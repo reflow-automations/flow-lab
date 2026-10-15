@@ -13,7 +13,7 @@ ROOT=Path(__file__).resolve().parent
 MODELS=ROOT/'models'
 APP_PORT=int(os.environ.get('FLOW_LAB_PORT','17865'))
 ASR_MODELS={'cloud-live':'gpt-live-transcribe','cloud-full':'gpt-4o-transcribe','cloud-mini':'gpt-4o-mini-transcribe'}
-FORMAT_MODELS={'cloud-mini':'gpt-4.1-mini-2025-04-14','cloud-nano':'gpt-4.1-nano-2025-04-14'}
+FORMAT_MODELS={'cloud-mini':'gpt-4.1-mini-2025-04-14','cloud-nano':'gpt-4.1-nano-2025-04-14','openrouter-free':'openrouter-free'}
 DICTIONARY='webhook, API, callback, deployment'
 
 def api_key():
@@ -190,17 +190,23 @@ async def _format_text_base(text,engine='cloud-mini',style='bericht',debug=False
     start=time.perf_counter()
     if engine=='local':
         base=await workers.ensure('local'); key=workers.token; model='local'
+    elif engine=='openrouter-free':model='openrouter-free'
     else: base='https://api.openai.com'; key=api_key(); model=FORMAT_MODELS[engine]
     style_hint={'bericht':'Maak een natuurlijk kort bericht.','notitie':'Maak een leesbare notitie; behoud opsommingen.','letterlijk':'Behoud alle woorden; pas alleen interpunctie, hoofdletters en alinea-indeling aan.'}.get(style,'Maak een natuurlijk kort bericht.')
     protected_hint='\nBehoud elke FLOWLAB_..._END-markering exact één keer en ongewijzigd op zijn plek.' if re.search(r'FLOWLAB_[0-9A-F]{12}_\d+_END',text) else ''
     payload={'model':model,'messages':[{'role':'system','content':PROMPT+'\n'+style_hint+protected_hint},{'role':'user','content':'<transcriptie>\n'+text+'\n</transcriptie>'}],'temperature':0,'max_tokens':min(3000,max(256,len(text)//2+200))}
     if engine=='local':payload['chat_template_kwargs']={'enable_thinking':False}
-    async with httpx.AsyncClient(timeout=60,trust_env=False) as c:
-        r=await c.post(base+'/v1/chat/completions',headers={'Authorization':'Bearer '+key},json=payload)
-        if r.status_code!=200:raise RuntimeError(f'Opmaakdienst gaf HTTP {r.status_code}.')
-        d=r.json(); choice=d['choices'][0]
-        if choice.get('finish_reason')=='length':raise RuntimeError('Opmaak is afgebroken; originele tekst behouden.')
-        result=conservative_layout(text,clean_layout(choice['message'].get('content') or ''))
+    if engine=='openrouter-free':
+        from openrouter_provider import complete
+        d=await complete(payload)
+    else:
+        async with httpx.AsyncClient(timeout=60,trust_env=False) as c:
+            r=await c.post(base+'/v1/chat/completions',headers={'Authorization':'Bearer '+key},json=payload)
+            if r.status_code!=200:raise RuntimeError(f'Opmaakdienst gaf HTTP {r.status_code}.')
+            d=r.json()
+    choice=d['choices'][0]
+    if choice.get('finish_reason')=='length':raise RuntimeError('Opmaak is afgebroken; originele tekst behouden.')
+    result=conservative_layout(text,clean_layout(choice['message'].get('content') or ''))
     candidate=result; guard_reason=content_guard(text,result);warning=None
     if guard_reason:
         result=text; warning='Opmaakcontrole wees de wijziging af. De oorspronkelijke tekst is behouden.'

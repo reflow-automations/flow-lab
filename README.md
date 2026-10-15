@@ -251,6 +251,43 @@ Niet elk tekstvak ondersteunt cursorcontrole. Geen brede hardwaretest, onderteke
 installer, AI-commandfunctie, teamomgeving of Ollama-integratie. Snelheidsmetingen
 op één pc zijn geen prestatiegarantie.
 
+## OpenRouter en gratis modellen (optioneel)
+
+Ga in de app naar **Instellingen > OpenRouter instellen**, of naar het tabblad
+**OpenRouter**. Plak je eigen OpenRouter-sleutel in het gemaskeerde veld en kies
+**Sleutel veilig opslaan**. De app bewaart die met Windows DPAPI versleuteld voor
+je Windows-account in de uitgesloten map `data/`. De sleutel wordt niet teruggetoond.
+Een alternatief is `OPENROUTER_API_KEY` in de lokale `.env.local`; dat bestand is
+dan gewone tekst en blijft uitgesloten van Git. Gebruik geen OpenAI-sleutel.
+
+1. Klik **Gratis modellen ophalen**. Alleen actuele gratis tekstmodellen met
+   voldoende context en nultarief worden aangeboden; geen moderatiemodellen.
+2. Kies een vast model en klik **Modelkeuze opslaan**.
+3. Controleer de sleutel en je actuele dagquotum met **Sleutel / quotum controleren**.
+4. Gebruik **Snelheid testen met voorbeeldtekst**. Dit verstuurt alleen een vaste
+   fictieve tekst, opent geen microfoon en maakt geen geschiedenisregel.
+5. Kies pas daarna **Lokale audio, OpenRouter gratis** als verwerkingsoptie.
+   Alleen instellen of testen schakelt de standaard niet om; die blijft lokaal.
+
+Gratis betekent niet lokaal: de herkende tekst gaat via OpenRouter naar de gekozen
+provider. Flow Lab vraagt standaard providers zonder gegevensverzameling. Dit kan
+gratis modellen onbeschikbaar maken. Je kunt deze voorkeur zelf uitzetten en opslaan;
+dan kunnen providers tekst bewaren of voor training gebruiken volgens hun voorwaarden.
+Je accountbeleid bij OpenRouter blijft ook gelden en wordt door Flow Lab niet gewijzigd.
+
+Er is geen willekeurige gratis router en geen automatische betaalde terugval. De app
+controleert `:free`, nultarieven en stuurt een prijsplafond van nul voor input, output
+en verzoekkosten. Er worden geen betaalde tools/plugins ingeschakeld. Bij een fout,
+quotum of timeout blijft tijdens dicteren de herkende tekst behouden met een melding.
+Eén lang dictaat kan door tekstsegmenten meerdere gratis verzoeken kosten.
+
+Gratis capaciteit kan druk zijn. Een catalogusvermelding garandeert geen beschikbare
+provider, snelheid of goede Nederlandse opmaak. Vergelijk met dezelfde voorbeeldtekst
+en houd volledig lokaal als betrouwbare uitwijkkeuze op je eigen pc.
+Bronnen: [gratis router en beperkingen](https://openrouter.ai/docs/guides/routing/routers/free-router),
+[limieten en actuele quotumcontrole](https://openrouter.ai/docs/api/reference/limits),
+[provider- en privacyfilters](https://openrouter.ai/docs/guides/routing/provider-selection).
+
 ## Open source en delen
 
 Publieke updates bevatten uitsluitend algemeen bruikbare code en verzonnen

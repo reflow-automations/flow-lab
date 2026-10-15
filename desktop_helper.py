@@ -31,7 +31,7 @@ QUIT_MESSAGE = 0x8051
 SETTINGS_MESSAGE = 0x8052
 OPEN_MESSAGE = 0x8053
 QUIT_ALL_MESSAGE = 0x8054
-PANEL_IDS={0:'home',1:'history',2:'dictionary',3:'snippets',4:'settings'}
+PANEL_IDS={0:'home',1:'history',2:'dictionary',3:'snippets',4:'settings',5:'openrouter'}
 
 def stored_status():
     try:
@@ -247,6 +247,7 @@ class Desktop:
             item('Geschiedenis', event('open','history')),
             item('Volledig lokaal', event('mode', 'local'), checked=lambda _: self.config['formatter']=='local'),
             item('Lokale audio, cloudopmaak', event('mode', 'cloud-mini'), checked=lambda _: self.config['formatter']=='cloud-mini'),
+            item('Lokale audio, OpenRouter gratis', event('mode','openrouter-free'),checked=lambda _:self.config['formatter']=='openrouter-free'),
             item('Sneltoets instellen...', event('shortcut_settings')),
             item('Sneltoets', pystray.Menu(*[item(v[2], event('key', k), checked=lambda _, key=k: self.config['hotkey']==shortcut(key)[0]) for k,v in w.HOTKEYS.items()])),
             item('Kopieer laatste tekst', event('copy')), item('Flow Lab volledig afsluiten', event('quit_all'))))
@@ -287,7 +288,7 @@ class Desktop:
 
     def settings_are_open(self):
         window=getattr(self,'control_window',None)
-        return bool(window and window.exists() and window.root.state()!='withdrawn' and window.notebook.select()==str(window.tabs['settings']))
+        return bool(window and window.exists() and window.root.state()!='withdrawn' and window.notebook.select() in (str(window.tabs['settings']),str(window.tabs['openrouter'])))
 
     def start(self):
         if self.current or self.state!='idle': return
@@ -429,12 +430,13 @@ class Desktop:
                     if self.state!='idle':
                         if self.control_window:self.control_window.status.set('Rond eerst je opname af om instellingen te wijzigen.')
                         continue
-                    if data.get('formatter') not in ('local','cloud-mini') or data.get('paragraphs') not in ('normaal','ruim','compact') or data.get('style') not in ('bericht','notitie','letterlijk'):continue
+                    if data.get('formatter') not in ('local','cloud-mini','openrouter-free') or data.get('paragraphs') not in ('normaal','ruim','compact') or data.get('style') not in ('bericht','notitie','letterlijk'):continue
                     self.config.update(data);self.config['engine']='parakeet' if data['formatter']=='local' else 'hybrid-parakeet'
                     CONFIG.write_text(json.dumps(self.config,indent=2),encoding='utf-8')
                     if self.control_window:self.control_window.status.set('Instellingen opgeslagen. Werkt bij je volgende dictaat.')
                     continue
                 if kind == 'mode':
+                    if args[0] not in ('local','cloud-mini','openrouter-free'):continue
                     self.config['formatter']=args[0]; self.config['engine']='parakeet' if args[0]=='local' else 'hybrid-parakeet'
                     CONFIG.write_text(json.dumps(self.config, indent=2), encoding='utf-8'); continue
                 if kind == 'key':

@@ -29,7 +29,7 @@ def validate_public_files(contents,allowed):
         if any(re.search(pattern,text) for pattern in patterns):errors.append(name+': possible secret or personal data')
         if name=='.env.example':
             values=[line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith('#')]
-            if values!=['OPENAI_API_KEY=']:errors.append(name+': example must contain only an empty key')
+            if not values or set(values)-{'OPENAI_API_KEY=','OPENROUTER_API_KEY='}:errors.append(name+': example must contain only empty supported keys')
         if name=='dictionary.json':
             try:
                 if json.loads(text).get('replacements')!={'webhoek':'webhook','superbase':'Supabase'}:

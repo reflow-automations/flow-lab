@@ -101,3 +101,29 @@ De huidige GPT-4.1-mini-snapshot wordt volgens OpenAI op 14 januari 2027
 uitgezet. Plan de evaluatie vóór die datum. Er is geen automatische migratie
 of nieuwe provider ingesteld.
 [Uitfaseringsbericht](https://developers.openai.com/api/docs/deprecations).
+
+## Aanvulling: gratis OpenRouter-modellen
+
+Op 15 oktober 2026 ook OpenRouter onderzocht. OpenRouter is een router naar meerdere
+providers. Het gratis `openrouter/free` kiest willekeurig een geschikt gratis model;
+voor consistente dicteeropmaak kiest Flow Lab daarom een vaste actuele `:free`-variant.
+Gratis capaciteit kan wisselen en wachttijden kunnen tijdens drukte oplopen.
+[Officiële uitleg](https://openrouter.ai/docs/guides/routing/routers/free-router).
+
+De accountlimieten zijn opvraagbaar via `/api/v1/key`; de app toont de opgegeven
+gratis dagruimte. Eén lang dictaat kan meerdere verzoeken gebruiken. Vermenigvuldig
+de daglimiet dus niet zonder meer naar een aantal dictaten.
+[Quotumdocumentatie](https://openrouter.ai/docs/api/reference/limits).
+
+Er zijn echte pogingen met vaste fictieve tekst gedaan onder het standaardbeleid
+zonder gegevensverzameling: Nemotron 3.5 Lightning en LFM2.5 kregen geen geschikte
+provider; Gemma 4 26B kreeg een capaciteits-/limietmelding. Een extra diagnostische
+aanroep bevestigde een privacybeleidsafwijzing voor LFM2.5. Geen betaalde terugval,
+geen versoepeling van privacy om alsnog een benchmark te forceren. Er is dus geen
+geldige end-to-end-snelheidsmeting van deze gratis modellen uit deze proef.
+
+Conclusie: nuttig als optionele experimentroute, niet aangetoond als snellere of
+betrouwbaardere vervanging van de lokale standaard. Dit is een momentopname en geen
+bewijs dat alle gratis modellen te traag zijn. Providerkeuze, accountbeleid en
+beschikbaarheid zijn bepalend. Flow Lab biedt een expliciete privacykeuze en een
+synthetische testknop om dit later opnieuw te beoordelen.

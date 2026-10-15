@@ -4,7 +4,8 @@
   "caveat": "Snelheden hieronder zijn medianen na einde audio, inclusief opmaak, met al geladen/opgewarmde modellen. Gemeten op één GPU-pc met drie korte synthetische clips, 3 tot 6 runs per route (15 oktober 2026). Het zijn geen garanties voor jouw pc, stem of langere teksten. De eerste lokale start kan veel langer duren; één koude Whisper-run duurde ongeveer 46 seconden.",
   "desktop": {
     "local": "Snel en volledig op deze pc: Parakeet + Qwen. Geen API-kosten. De lokale opmaak is experimenteel en kan woorden onbedoeld wijzigen.",
-    "cloud-mini": "Bestaande cloudopmaak: Parakeet + GPT-4.1 mini. Alleen herkende tekst naar OpenAI, met API-kosten. Deze formatter wordt op 14 januari 2027 uitgefaseerd; lokaal blijft standaard."
+    "cloud-mini": "Bestaande cloudopmaak: Parakeet + GPT-4.1 mini. Alleen herkende tekst naar OpenAI, met API-kosten. Deze formatter wordt op 14 januari 2027 uitgefaseerd; lokaal blijft standaard.",
+    "openrouter-free": "Optioneel experiment: lokale audio, tekstopmaak via een vast gratis OpenRouter-model. Sleutel nodig; snelheid en daglimieten wisselen. Alleen gratis routes, geen betaalde terugval. Tekst verlaat deze pc."
   },
   "engines": {
     "hybrid-parakeet": {
@@ -44,6 +45,10 @@
     "verbatim": {
       "title": "Geen nabewerking: herkenning behouden",
       "text": "Slaat de AI-opmaakstap over. Bespaart die verwerkingstijd, maar geeft minder redactie. Woordenboek, snippets en de gekozen alinea-indeling kunnen nog wel worden toegepast; dit is dus niet per definitie het ruwe transcript."
+    },
+    "openrouter-free": {
+      "title": "OpenRouter gratis: proberen, niet als snelle zekerheid",
+      "text": "Kies eerst een vast :free-model en voeg een OpenRouter-sleutel toe in de native app. OpenRouter en de provider ontvangen de herkende tekst. Gratis capaciteit en snelheid wisselen; één lang dictaat kan meerdere verzoeken kosten. Er is geen automatische betaalde terugval. De eigen snelheidstest gebruikt alleen een vaste voorbeeldtekst."
     }
   },
   "measurements": [
@@ -100,6 +105,14 @@
     {
       "title": "OpenAI: modeluitfasering",
       "url": "https://developers.openai.com/api/docs/deprecations"
+    },
+    {
+      "title": "OpenRouter: gratis modellen en beperkingen",
+      "url": "https://openrouter.ai/docs/guides/routing/routers/free-router"
+    },
+    {
+      "title": "OpenRouter: actuele limieten",
+      "url": "https://openrouter.ai/docs/api/reference/limits"
     }
   ]
 }

@@ -37,7 +37,7 @@ def test_native_window_library_history_roundtrip(monkeypatch,tk_window):
         window.load_history();window.history_tree.selection_set(history_id);window.select_history()
         assert window.history_text.get('1.0','end-1c')=='Twee\n\nalinea’s'
         window.hide();assert window.root.state()=='withdrawn'
-        assert len(window.notebook.tabs())==5
+        assert len(window.notebook.tabs())==6
         def descendants(widget):
             for child in widget.winfo_children():
                 yield child

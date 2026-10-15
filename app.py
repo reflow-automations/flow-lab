@@ -10,6 +10,7 @@ from engines import ROOT, APP_PORT, ASR_MODELS, FORMAT_MODELS, MAX_SECONDS, Clou
 import storage
 from personalization import snippet_preview
 from limits import MAX_WAV_BYTES,MAX_TEXT_CHARS,LIMIT_MESSAGE
+import openrouter_provider
 
 ORIGINS={f'http://127.0.0.1:{APP_PORT}',f'http://localhost:{APP_PORT}'}
 gate=asyncio.Lock()
@@ -61,6 +62,57 @@ def remember(result,raw,source,engine,formatter,style,paragraphs,duration=None):
 @app.get('/api/library')
 async def library():
     return {'dictionary':storage.entries('dictionary'),'snippets':storage.entries('snippet')}
+
+@app.get('/api/openrouter/status')
+async def openrouter_status():return openrouter_provider.status()
+
+@app.get('/api/openrouter/models')
+async def openrouter_models(refresh:bool=False):
+    try:return {'models':await openrouter_provider.catalogue(refresh)}
+    except RuntimeError as e:raise HTTPException(503,str(e))
+
+@app.post('/api/openrouter/key')
+async def openrouter_key(request:Request):
+    if gate.locked():raise HTTPException(409,'Wacht tot de opname is verwerkt.')
+    # Parse manually so validation errors can never echo a submitted secret.
+    try:
+        body=await request.json();openrouter_provider.save_key(body.get('key') if isinstance(body,dict) else None)
+    except (ValueError,TypeError):raise HTTPException(400,'Vul een geldige OpenRouter-sleutel in; de waarde wordt niet teruggestuurd.')
+    except (OSError,RuntimeError):raise HTTPException(500,'Windows kon de sleutel niet veilig opslaan.')
+    return {'configured':True}
+
+@app.post('/api/openrouter/model')
+async def openrouter_model(request:Request):
+    if gate.locked():raise HTTPException(409,'Wacht tot de opname is verwerkt.')
+    try:
+        body=await request.json();identifier=body.get('model','');await openrouter_provider.select_model(identifier)
+    except (ValueError,TypeError,AttributeError):raise HTTPException(400,'Kies een geldig gratis model uit de lijst.')
+    except RuntimeError as e:raise HTTPException(503,str(e))
+    return {'model':identifier}
+
+@app.post('/api/openrouter/check')
+async def openrouter_check():
+    try:return await openrouter_provider.check_key()
+    except RuntimeError as e:raise HTTPException(400,str(e))
+
+@app.post('/api/openrouter/privacy')
+async def openrouter_privacy(request:Request):
+    if gate.locked():raise HTTPException(409,'Wacht tot de opname is verwerkt.')
+    try:choice=(await request.json()).get('data_collection')
+    except (ValueError,AttributeError):raise HTTPException(400,'Ongeldige privacykeuze.')
+    if choice not in ('deny','allow'):raise HTTPException(400,'Ongeldige privacykeuze.')
+    storage.set_setting('openrouter_data_collection',choice)
+    return {'data_collection':choice}
+
+@app.post('/api/openrouter/test')
+async def openrouter_test():
+    if gate.locked():raise HTTPException(409,'Wacht tot de opname is verwerkt.')
+    async with gate:
+        try:
+            text='hallo Alex de voorbeeldplanning is klaar ik kan vrijdag niet maar maandag wel het bedrag is 1500 euro exclusief btw'
+            result=await format_text(text,'openrouter-free')
+            return {'text':result['text'],'ms':result['ms'],'warning':result['warning'],'synthetic':True}
+        except RuntimeError as e:raise HTTPException(400,str(e))
 
 class EntryInput(BaseModel):
     id:str|None=None
@@ -175,8 +227,9 @@ async def record(ws:WebSocket):
                 asr_ms=(time.perf_counter()-stopped)*1000
                 await ws.send_json({'type':'recognized','text':raw})
                 try:formatted=await format_text(raw,formatter,style,paragraphs=paragraphs)
-                except Exception:
-                    formatted={'text':raw,'ms':0,'warning':'Opmaak mislukt. De herkende tekst is behouden; controleer en kopieer deze zelf.'}
+                except Exception as exc:
+                    reason=str(exc)[:200] if isinstance(exc,RuntimeError) else 'Opmaak mislukt.'
+                    formatted={'text':raw,'ms':0,'warning':reason+' De herkende tekst is behouden; controleer en kopieer deze zelf.'}
                 return {'type':'done','raw':raw,'text':formatted['text'],'asr_ms':round(asr_ms,1),'format_ms':formatted['ms'],'after_stop_ms':round((time.perf_counter()-stopped)*1000,1),'warning':formatted['warning'],'snippets':formatted.get('snippets',[])}
             async def cancelled():
                 while True:

@@ -39,9 +39,9 @@ class NativeApp:
         ttk.Label(shell,text='Spreken, opmaken en terugvinden. Op jouw pc.',style='Flow.TLabel').pack(anchor='w',pady=(3,18))
         self.notebook=ttk.Notebook(shell);self.notebook.pack(fill='both',expand=True)
         self.tabs={}
-        for key,label in [('home','Dicteren'),('history','Geschiedenis'),('dictionary','Woordenboek'),('snippets','Snippets'),('settings','Instellingen')]:
+        for key,label in [('home','Dicteren'),('history','Geschiedenis'),('dictionary','Woordenboek'),('snippets','Snippets'),('settings','Instellingen'),('openrouter','OpenRouter')]:
             tab=ttk.Frame(self.notebook,padding=18);self.tabs[key]=tab;self.notebook.add(tab,text=label)
-        self.build_home();self.build_history();self.build_settings()
+        self.build_home();self.build_history();self.build_settings();self.build_openrouter()
         self.editors={kind:LibraryEditor(self,kind,self.tabs['snippets' if kind=='snippet' else 'dictionary']) for kind in ('dictionary','snippet')}
         self.status=tk.StringVar(value='Verbinden met de lokale verwerking...')
         ttk.Label(shell,textvariable=self.status,style='Flow.TLabel').pack(anchor='w',pady=(12,4))
@@ -57,7 +57,7 @@ class NativeApp:
         def task():
             try:
                 response=httpx.request(method,self.app.service_url+path,json=data,
-                    headers={'Origin':self.app.service_url},timeout=8)
+                    headers={'Origin':self.app.service_url},timeout=90 if path.startswith('/api/openrouter/') else 8,trust_env=False)
                 if response.is_error:
                     try:detail=response.json().get('detail','Actie mislukt')
                     except Exception:detail='Lokale verwerking antwoordt niet goed'
@@ -87,6 +87,7 @@ class NativeApp:
         elif selected==str(self.tabs['dictionary']):self.editors['dictionary'].load()
         elif selected==str(self.tabs['snippets']):self.editors['snippet'].load()
         elif selected==str(self.tabs['settings']):self.refresh_settings()
+        elif selected==str(self.tabs['openrouter']):self.load_openrouter_status()
         else:self.refresh_home()
 
     def build_settings(self):
@@ -117,7 +118,7 @@ class NativeApp:
         ttk.Label(shortcuts,text='Houd ingedrukt om te spreken; dubbel indrukken vergrendelt.\nSneltoetsen zijn gepauzeerd zolang dit tabblad openstaat. Ga daarna naar Dicteren.\nSluit Wispr zelf als je dezelfde combinatie gebruikt.',justify='left').pack(anchor='w')
         options=ttk.LabelFrame(tab,text='Tekstverwerking',padding=14);options.pack(fill='x',pady=14)
         self.preference_vars={};self.preference_choices={
-            'formatter':{'Volledig lokaal':'local','Lokale audio, cloudopmaak':'cloud-mini'},
+            'formatter':{'Volledig lokaal':'local','Lokale audio, cloudopmaak':'cloud-mini','Lokale audio, OpenRouter gratis':'openrouter-free'},
             'paragraphs':{'Natuurlijk':'normaal','Meer witregels':'ruim','Alleen modelopmaak':'compact'},
             'style':{'Natuurlijk bericht':'bericht','Notitie of opsomming':'notitie','Woorden behouden':'letterlijk'}}
         for index,(key,label) in enumerate([('formatter','Verwerking'),('paragraphs',"Alinea's"),('style','Schrijfstijl')]):
@@ -133,6 +134,7 @@ class NativeApp:
         self.settings_model_hint=tk.StringVar()
         ttk.Label(options,textvariable=self.settings_model_hint,wraplength=300,justify='left').grid(row=0,column=2,rowspan=3,sticky='nw',padx=(24,0))
         ttk.Button(options,text='Welke modellen kies ik?',command=self.show_model_guide).grid(row=3,column=2,sticky='w',padx=(24,0),pady=(9,0))
+        ttk.Button(tab,text='OpenRouter instellen (optioneel)',command=lambda:self.show('openrouter')).pack(anchor='w',pady=(0,8))
         def explain_settings(*_):
             selected=self.preference_choices['formatter'].get(self.preference_vars['formatter'].get(),'local')
             self.settings_model_hint.set(self.model_guide['desktop'][selected])
@@ -155,12 +157,13 @@ class NativeApp:
         self.replay_text=tk.StringVar();ttk.Label(tab,textvariable=self.replay_text).pack(anchor='w',pady=(12,18))
         row=ttk.Frame(tab);row.pack(fill='x')
         ttk.Label(row,text='Verwerking:').pack(side='left',padx=(0,10))
-        self.mode=tk.StringVar(value='Volledig lokaal' if self.app.config['formatter']=='local' else 'Lokale audio, cloudopmaak')
-        choice=ttk.Combobox(row,textvariable=self.mode,values=['Volledig lokaal','Lokale audio, cloudopmaak'],state='readonly',width=29)
-        choice.pack(side='left');choice.bind('<<ComboboxSelected>>',lambda _:self.app.events.put(('mode','local' if self.mode.get()=='Volledig lokaal' else 'cloud-mini')))
+        self.mode_choices={'Volledig lokaal':'local','Lokale audio, cloudopmaak':'cloud-mini','Lokale audio, OpenRouter gratis':'openrouter-free'}
+        self.mode=tk.StringVar(value=next(name for name,value in self.mode_choices.items() if value==self.app.config['formatter']))
+        choice=ttk.Combobox(row,textvariable=self.mode,values=list(self.mode_choices),state='readonly',width=31)
+        choice.pack(side='left');choice.bind('<<ComboboxSelected>>',lambda _:self.app.events.put(('mode',self.mode_choices[self.mode.get()])))
         ttk.Button(row,text='Welke modellen kies ik?',command=self.show_model_guide).pack(side='left',padx=12)
         self.home_model_hint=tk.StringVar()
-        def explain_home(*_):self.home_model_hint.set(self.model_guide['desktop']['local' if self.mode.get()=='Volledig lokaal' else 'cloud-mini'])
+        def explain_home(*_):self.home_model_hint.set(self.model_guide['desktop'][self.mode_choices[self.mode.get()]])
         self.mode.trace_add('write',explain_home);explain_home()
         ttk.Label(tab,textvariable=self.home_model_hint,wraplength=820).pack(anchor='w',pady=(8,20))
         ttk.Label(tab,text='Laatste resultaat',font=('Segoe UI',12,'bold')).pack(anchor='w')
@@ -184,7 +187,7 @@ class NativeApp:
         import desktop_windows as w
         key=w.REPLAY_KEYS.get(self.app.replay_key,(None,None,'Geen vrije sneltoets'))[2]
         self.replay_text.set(key+'  |  Laatste tekst opnieuw plaatsen')
-        self.mode.set('Volledig lokaal' if self.app.config['formatter']=='local' else 'Lokale audio, cloudopmaak')
+        self.mode.set(next(name for name,value in self.mode_choices.items() if value==self.app.config['formatter']))
         def status(data,error):
             if not error:self.status.set('Lokale verwerking actief. '+('Er wordt momenteel verwerkt.' if data['busy'] else 'Klaar om te dicteren.'))
         self.request('/api/status',status)
@@ -197,6 +200,67 @@ class NativeApp:
         import desktop_windows as w
         try:w.copy_text(self.app.hwnd,text);self.status.set('Tekst gekopieerd.')
         except Exception:self.status.set('Klembord is bezet. Probeer opnieuw.')
+
+    def build_openrouter(self):
+        tab=self.tabs['openrouter'];self.router_models=[]
+        ttk.Label(tab,text='OpenRouter: gratis tekstopmaak uitproberen',font=('Segoe UI',16,'bold')).pack(anchor='w')
+        ttk.Label(tab,text='Audio blijft lokaal. Herkende tekst gaat via OpenRouter naar de gekozen provider.\nGratis modellen kunnen druk of tijdelijk niet beschikbaar zijn. Lokaal blijft de standaard.',wraplength=870).pack(anchor='w',pady=10)
+        self.router_status=tk.StringVar(value='Nog niet gecontroleerd.');ttk.Label(tab,textvariable=self.router_status,wraplength=870).pack(anchor='w',pady=(0,10))
+        row=ttk.Frame(tab);row.pack(fill='x')
+        self.router_key=tk.StringVar();ttk.Entry(row,textvariable=self.router_key,show='*',width=55).pack(side='left',fill='x',expand=True)
+        def save_key():
+            key=self.router_key.get().strip();self.router_key.set('')
+            def saved(data,error):
+                self.router_status.set(error if error else 'Sleutel versleuteld opgeslagen voor je Windows-account.')
+                if not error:self.load_openrouter_status()
+            self.request('/api/openrouter/key',saved,'POST',{'key':key})
+        ttk.Button(row,text='Sleutel veilig opslaan',command=save_key).pack(side='left',padx=8)
+        ttk.Label(tab,text='De opgeslagen sleutel wordt niet teruggetoond. Je kunt ook OPENROUTER_API_KEY in .env.local gebruiken.').pack(anchor='w',pady=(6,14))
+        self.router_model=tk.StringVar();self.router_combo=ttk.Combobox(tab,textvariable=self.router_model,state='readonly',width=82);self.router_combo.pack(fill='x')
+        buttons=ttk.Frame(tab);buttons.pack(fill='x',pady=10)
+        def models():
+            self.router_status.set('Actuele gratis modellen ophalen...')
+            def loaded(data,error):
+                if error:self.router_status.set(error);return
+                self.router_models=data['models'];ids=[m['id'] for m in self.router_models];self.router_combo.configure(values=ids)
+                if self.router_model.get() not in ids:self.router_model.set('')
+                self.router_status.set(f'{len(ids)} gratis tekstmodellen gevonden. Kies er één en sla de modelkeuze op.')
+            self.request('/api/openrouter/models?refresh=true',loaded)
+        def save_model():
+            def saved(data,error):self.router_status.set(error if error else 'Model opgeslagen. Kies bij Verwerking OpenRouter gratis om het te gebruiken.')
+            self.request('/api/openrouter/model',saved,'POST',{'model':self.router_model.get()})
+        def check():
+            def checked(data,error):
+                if error:self.router_status.set(error);return
+                q=data['free_requests'];self.router_status.set('Sleutel geldig. Gratis verzoeken resterend vandaag: '+str(q.get('remaining') if q.get('remaining') is not None else 'niet opgegeven')+' (daglimiet '+str(q.get('limit') if q.get('limit') is not None else 'onbekend')+').')
+            self.request('/api/openrouter/check',checked,'POST')
+        for label,fn in [('Gratis modellen ophalen',models),('Modelkeuze opslaan',save_model),('Sleutel / quotum controleren',check)]:ttk.Button(buttons,text=label,command=fn).pack(side='left',padx=(0,8))
+        self.router_private=tk.BooleanVar(value=True)
+        privacy_row=ttk.Frame(tab);privacy_row.pack(fill='x')
+        ttk.Checkbutton(privacy_row,text='Alleen providers zonder gegevensverzameling',variable=self.router_private).pack(side='left')
+        def save_privacy():
+            def saved(data,error):self.router_status.set(error if error else 'Privacykeuze opgeslagen. Je OpenRouter-accountbeleid blijft ook gelden.')
+            self.request('/api/openrouter/privacy',saved,'POST',{'data_collection':'deny' if self.router_private.get() else 'allow'})
+        ttk.Button(privacy_row,text='Privacykeuze opslaan',command=save_privacy).pack(side='left',padx=10)
+        ttk.Label(tab,text='Als je dit uitzet, kunnen providers je tekst bewaren of voor training gebruiken volgens hun voorwaarden.\nAlleen :free-modellen met nultarief; geen betaald alternatief of willekeurige router.\nEén lang dictaat kan meerdere verzoeken gebruiken. De daglimiet is dus geen aantal dictaten.',wraplength=870).pack(anchor='w',pady=(4,12))
+        def test():
+            self.router_status.set('Test met vaste, verzonnen tekst. Er wordt geen opname gebruikt...')
+            def tested(data,error):
+                if error:self.router_status.set(error);return
+                set_text(self.router_result,data['text'])
+                self.router_status.set(f"Test klaar in {data['ms']/1000:.2f} s. "+(data.get('warning') or 'Beoordeel ook de inhoud; dit is één korte proef.'))
+            self.request('/api/openrouter/test',tested,'POST')
+        ttk.Button(tab,text='Snelheid testen met voorbeeldtekst',command=test).pack(anchor='w')
+        self.router_result=tk.Text(tab,height=5,wrap='word',font=('Segoe UI',10),padx=8,pady=8);self.router_result.pack(fill='both',expand=True,pady=8)
+
+    def load_openrouter_status(self):
+        def loaded(data,error):
+            if error:self.router_status.set(error);return
+            self.router_model.set(data['model'])
+            self.router_private.set(data.get('data_collection','deny')=='deny')
+            key_message='Sleutel aanwezig.' if data['configured'] else ('De ingevulde waarde heeft geen OpenRouter-formaat.' if data.get('key_present') else 'Voeg je eigen OpenRouter-sleutel toe.')
+            self.router_status.set(key_message+' Alleen gratis modellen; standaardverwerking blijft ongewijzigd.')
+        self.request('/api/openrouter/status',loaded)
 
     def build_history(self):
         tab=self.tabs['history'];row=ttk.Frame(tab);row.pack(fill='x')
