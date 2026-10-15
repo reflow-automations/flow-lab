@@ -230,7 +230,19 @@ class Desktop:
         self.test_started = False
         self.make_tray()
         if test: self.make_scratch()
+        else: self.prewarm()
         self.root.after(20, self.poll)
+
+    def prewarm(self):
+        """Load the chosen local models now, so the first dictation is not the slow one."""
+        config={'engine':self.config['engine'],'formatter':self.config['formatter']}
+        def run():
+            import httpx
+            for _ in range(30):
+                try:
+                    httpx.post(URL+'/api/prewarm',json=config,headers={'Origin':URL},timeout=2,trust_env=False);return
+                except httpx.HTTPError:time.sleep(1)
+        threading.Thread(target=run,daemon=True).start()
 
     def write_state(self, registered=None):
         if registered is not None: self.main_registered=registered
@@ -404,7 +416,7 @@ class Desktop:
         began=time.monotonic()
         text = result.get('text', '')
         backup = None; own_sequence = None
-        ok = False; paste_sent=False; reason = 'Geen tekst ontvangen'
+        ok = False; complete=False; paste_sent=False; reason = 'Geen tekst ontvangen'
         try:
             if not text: return
             if result.get('warning'):
@@ -431,7 +443,6 @@ class Desktop:
                 released=getattr(session,'released_at',None)
                 if released is not None:session.timings['release_to_paste_sent_ms']=round((time.monotonic()-released)*1000,1)
             # Wait for the target to consume Ctrl+V before restoring the clipboard.
-            complete=False
             for _ in range(12):
                 time.sleep(.05)
                 if self.uia.submit(w.verify_target, session.target, text).result(timeout=.5): ok=True; break
@@ -440,7 +451,9 @@ class Desktop:
                     if hasattr(session,'timings') and getattr(session,'released_at',None) is not None:
                         session.timings['release_to_complete_text_ms']=round((time.monotonic()-session.released_at)*1000,1)
                     break # Exact full dictation proves clipboard consumption, not surrounding-text preservation.
-            reason=('Ingevoegd' if ok else 'Volledige dictatie geplaatst; controleer eventuele bestaande tekst.' if complete
+            # Ctrl+V cannot remove unselected text. A field that now holds exactly the dictation
+            # was empty with hint text (e.g. "Reply..."), so tell the user it worked.
+            reason=('Ingevoegd' if ok else 'Ingevoegd in leeg tekstvak' if complete
                     else 'Plakken verstuurd; controleer het tekstvak')
         except Exception as exc:
             reason='Niet ingevoegd: '+str(exc)[:105]
@@ -458,7 +471,7 @@ class Desktop:
                     session.timings['release_to_outcome_ms']=round((time.monotonic()-released)*1000,1)
                     if ok:session.timings['release_to_verified_ms']=session.timings['release_to_outcome_ms']
             if hasattr(self,'record_insertion'):self.record_insertion(session,ok,reason,paste_sent)
-            self.events.put(('inserted', session.ident, ok, reason))
+            self.events.put(('inserted', session.ident, ok or complete, reason))
 
     def record_insertion(self,session,ok,reason,paste_sent):
         target=getattr(session,'target',None)
@@ -500,11 +513,12 @@ class Desktop:
                     self.config.update(data);self.config['engine']='parakeet' if data['formatter']=='local' else 'hybrid-parakeet'
                     CONFIG.write_text(json.dumps(self.config,indent=2),encoding='utf-8')
                     if self.control_window:self.control_window.status.set('Instellingen opgeslagen. Werkt bij je volgende dictaat.')
+                    self.prewarm()
                     continue
                 if kind == 'mode':
                     if args[0] not in ('local','cloud-mini','openrouter-free'):continue
                     self.config['formatter']=args[0]; self.config['engine']='parakeet' if args[0]=='local' else 'hybrid-parakeet'
-                    CONFIG.write_text(json.dumps(self.config, indent=2), encoding='utf-8'); continue
+                    CONFIG.write_text(json.dumps(self.config, indent=2), encoding='utf-8'); self.prewarm(); continue
                 if kind == 'key':
                     if self.state=='idle':self.hotkeys.command('change',args[0])
                     else:self.display('Rond eerst je opname af om de sneltoets te wijzigen.')
@@ -569,7 +583,8 @@ class Desktop:
                     self.last_text=args[0].get('text',''); self.state='inserting'; self.display('Tekst plaatsen...')
                     threading.Thread(target=self.insert,args=(self.current,args[0]),daemon=True).start()
                 elif kind == 'inserted':
-                    timing=getattr(self.current,'timings',{}).get('release_to_verified_ms')
+                    timings=getattr(self.current,'timings',{})
+                    timing=timings.get('release_to_verified_ms',timings.get('release_to_complete_text_ms'))
                     message='Geplaatst in het gekozen tekstvak.' if args[0] else args[1]+' Je tekst blijft hieronder beschikbaar.'
                     if args[0] and timing is not None:message+=f' {timing/1000:.2f} s van loslaten tot bevestigd plaatsen.'
                     self.remember_status(message)

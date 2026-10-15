@@ -96,9 +96,17 @@ def conservative_layout(raw,text):
     text=re.sub(r'(^|\n\n)([a-zà-ÿ])',lambda m:m[1]+m[2].upper(),text)
     return clean_layout(text)
 
+# Formatter output mostly copies the transcript, so n-gram drafts from the prompt are
+# accepted often. Greedy decoding keeps the output identical; only the speed changes.
+SPECULATIVE_ARGS=['--spec-type','ngram-simple','--spec-ngram-simple-size-n','3','--spec-ngram-simple-size-m','24']
+IDLE_WAKE_SECONDS=45
+
 class LocalWorkers:
     def __init__(self):
         self.processes={}; self.locks={n:asyncio.Lock() for n in ('parakeet','whisper','local')}; self.token=secrets.token_urlsafe(32);self.warmed=set()
+        self.warm_locks={n:asyncio.Lock() for n in ('parakeet','whisper','local')};self.last_used={}
+    def used(self,name):self.last_used[name]=time.monotonic()
+    def idle(self,name):return time.monotonic()-self.last_used.get(name,0)>IDLE_WAKE_SECONDS
     def executable(self,folder,name):
         paths=list((ROOT/'runtime'/folder).rglob(name))
         if not paths: raise RuntimeError(f'Lokale runtime {folder} ontbreekt. Voer setup_models.py uit.')
@@ -115,7 +123,7 @@ class LocalWorkers:
                 args=[str(exe),'serve','--host','127.0.0.1','--port',str(port),'--asr-model',str(MODELS/'parakeet-tdt-0.6b-v3.q8_0.gguf'),'--device','cuda:0','--api-key',self.token,'--no-ui','--max-upload-mb','20']
             elif name=='local':
                 exe=self.executable('llama','llama-server.exe')
-                args=[str(exe),'-m',str(MODELS/'Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf'),'--host','127.0.0.1','--port',str(port),'-c','8192','-ngl','99','-np','1','--api-key',self.token,'--reasoning','off','--jinja']
+                args=[str(exe),'-m',str(MODELS/'Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf'),'--host','127.0.0.1','--port',str(port),'-c','8192','-ngl','99','-np','1','--api-key',self.token,'--reasoning','off','--jinja',*SPECULATIVE_ARGS]
             else:
                 exe=self.executable('whisper','whisper-server.exe')
                 args=[str(exe),'-m',str(MODELS/'ggml-large-v3-turbo-q5_0.bin'),'--host','127.0.0.1','--port',str(port),'-l','nl','-t','6','-fa','-mc','0','--request-path','/'+self.token]
@@ -155,19 +163,32 @@ async def local_transcribe(pcm,engine):
     async with httpx.AsyncClient(timeout=180,trust_env=False) as c:
         r=await c.post(url+route,files={'file':('speech.wav',wav,'audio/wav')},data=data,headers={'Authorization':'Bearer '+workers.token})
         if r.status_code!=200: raise RuntimeError(f'{engine} gaf HTTP {r.status_code}.')
+        workers.used(engine)
         return r.json().get('text','').strip()
+
+async def _warm_once(name,warm):
+    # One warm-up per process, even when startup prewarm and a dictation overlap.
+    async with workers.warm_locks[name]:
+        await workers.ensure(name)
+        if name not in workers.warmed:
+            await warm()
+            workers.warmed.add(name)
 
 async def prepare_local(engine,formatter):
     if engine in ('parakeet','whisper'):
-        await workers.ensure(engine)
-        if engine not in workers.warmed:
-            await local_transcribe(bytes(48000),engine)
-            workers.warmed.add(engine)
+        await _warm_once(engine,lambda:local_transcribe(bytes(48000),engine))
     if formatter=='local':
-        await workers.ensure('local')
-        if 'local' not in workers.warmed:
-            await format_text('Dit is een korte test.','local')
-            workers.warmed.add('local')
+        await _warm_once('local',lambda:format_text('Dit is een korte test.','local'))
+
+async def wake_local(engine,formatter):
+    """While the user speaks, wake idle local models so the GPU is fast again on release."""
+    tasks=[]
+    if engine in ('parakeet','whisper') and workers.idle(engine) and engine in workers.warmed:
+        tasks.append(local_transcribe(bytes(24000),engine))
+    if formatter=='local' and workers.idle('local') and 'local' in workers.warmed:
+        tasks.append(format_text('Dit is een korte test.','local'))
+    for result in await asyncio.gather(*tasks,return_exceptions=True):
+        if isinstance(result,BaseException) and not isinstance(result,Exception):raise result
 
 async def _format_text_base(text,engine='cloud-mini',style='bericht',debug=False):
     text=text.strip()
@@ -204,6 +225,7 @@ async def _format_text_base(text,engine='cloud-mini',style='bericht',debug=False
             r=await c.post(base+'/v1/chat/completions',headers={'Authorization':'Bearer '+key},json=payload)
             if r.status_code!=200:raise RuntimeError(f'Opmaakdienst gaf HTTP {r.status_code}.')
             d=r.json()
+        if engine=='local':workers.used('local')
     choice=d['choices'][0]
     if choice.get('finish_reason')=='length':raise RuntimeError('Opmaak is afgebroken; originele tekst behouden.')
     result=conservative_layout(text,clean_layout(choice['message'].get('content') or ''))

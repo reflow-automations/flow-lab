@@ -166,9 +166,20 @@ gewijzigd. Niet alle tekstvakken, terminals en verhoogde apps worden ondersteund
 **Plaatsingsstatus en snelheid:** het vak **Kopie van laatste resultaat** toont
 altijd een kopie, ook wanneer invoegen niet lukt. De status erboven vermeldt of
 plaatsing bevestigd is, met de tijd vanaf stoppen/loslaten tot die bevestiging.
-Dit is iets anders dan alleen de rekentijd van herkenning en opmaak. De eerste
-opname na een modelstart kan extra laadtijd hebben. Bij wachten op de lokale
-modellen verschijnt een laadmelding; de opname blijft ondertussen in geheugen.
+Dit is iets anders dan alleen de rekentijd van herkenning en opmaak. De
+desktophelper laadt de gekozen lokale modellen direct bij het starten op de
+achtergrond, zodat de eerste opname niet op het laden wacht. Een model dat even
+niet gebruikt is, wordt tijdens het spreken alvast gewekt. De lokale opmaak
+gebruikt n-gram speculative decoding van llama.cpp: de opgemaakte tekst lijkt
+sterk op de invoer, dus het model kan stukken vooruit voorspellen. Met
+temperatuur 0 blijft de uitkomst gelijk; in een kleine synthetische proef was
+opmaken twee tot drie keer sneller. Duurt laden toch langer, dan verschijnt een
+laadmelding; de opname blijft ondertussen in geheugen.
+
+Een leeg chatveld met hinttekst (zoals "Antwoord...") geeft die hinttekst soms
+als inhoud door. Staat na het plakken precies de dictatie in het veld, dan meldt
+Flow Lab **Ingevoegd in leeg tekstvak**. Plakken kan geen tekst wissen die niet
+geselecteerd was.
 Foutmeldingen blijven 15 seconden in het balkje staan en zijn daarna terug te
 lezen in de app, ook na herstart. Alleen de nieuwste plaatsingsdiagnose en
 tijdsmetingen worden lokaal bewaard in `logs/desktop-last-insertion.json`;

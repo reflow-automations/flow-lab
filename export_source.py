@@ -14,7 +14,7 @@ app.py engines.py storage.py personalization.py dictionary.json limits.py openro
 desktop_helper.py desktop_windows.py native_app.py model_guide.py shortcut_config.py dictation_gesture.py compact_overlay.py last_transcript.py
 check_wispr_library.py setup_models.py model-lock.json requirements.lock.txt export_source.py
 web/index.html web/app.js web/style.css web/recorder.js web/model-guide.json
-pytest.ini conftest.py test_flow.py test_personalization.py test_desktop.py test_replay_import.py test_shortcuts.py test_gesture.py test_native_app.py test_model_guide.py test_long_dictation.py test_openrouter.py test_recorder.cjs'''.split()
+pytest.ini conftest.py test_flow.py test_personalization.py test_desktop.py test_replay_import.py test_shortcuts.py test_gesture.py test_native_app.py test_model_guide.py test_long_dictation.py test_openrouter.py test_speed.py test_recorder.cjs'''.split()
 
 def build(destination=None):
     destination=Path(destination) if destination else ROOT/'releases/flow-lab-0.2.0-source.zip'

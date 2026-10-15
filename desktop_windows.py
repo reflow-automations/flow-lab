@@ -407,7 +407,8 @@ for name in ['waveInStart','waveInStop','waveInReset','waveInClose']:api(winmm,n
 class Microphone:
     def __init__(self,push):
         self.push=push;self.handle=W.HANDLE();self.running=False;self.guard=threading.RLock();self.inflight=0;self.returned=threading.Event()
-        self.buffers=[C.create_string_buffer(1920) for _ in range(3)];self.headers=[WAVEHDR(C.cast(b,PTR),1920,0,0,0,0,None,0) for b in self.buffers]
+        # 10 x 40 ms in flight: a short Python/GIL pause can no longer starve the device and drop words.
+        self.buffers=[C.create_string_buffer(1920) for _ in range(10)];self.headers=[WAVEHDR(C.cast(b,PTR),1920,0,0,0,0,None,0) for b in self.buffers]
         self.callback=WAVECALLBACK(self.on_data)
     def start(self):
         fmt=WAVEFORMAT(1,1,24000,48000,2,16,0)

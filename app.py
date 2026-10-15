@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field
-from engines import ROOT, APP_PORT, ASR_MODELS, FORMAT_MODELS, MAX_SECONDS, CloudStream, workers, format_text, local_transcribe, run_clip, read_wav, silent,prepare_local
+from engines import ROOT, APP_PORT, ASR_MODELS, FORMAT_MODELS, MAX_SECONDS, CloudStream, workers, format_text, local_transcribe, run_clip, read_wav, silent,prepare_local,wake_local
 import storage
 from personalization import snippet_preview
 from limits import MAX_WAV_BYTES,MAX_TEXT_CHARS,LIMIT_MESSAGE
@@ -169,6 +169,22 @@ async def warm(request:Request):
             return {'ready':True}
         except RuntimeError as e:raise HTTPException(400,str(e))
 
+prewarm_task=None
+
+@app.post('/api/prewarm')
+async def prewarm(request:Request):
+    """Load local models in the background at startup; never holds the dictation gate."""
+    global prewarm_task
+    data=await request.json();engine=data.get('engine'); formatter=data.get('formatter')
+    try:validate(engine,formatter)
+    except ValueError as e:raise HTTPException(400,str(e))
+    if prewarm_task is None or prewarm_task.done():
+        async def run():
+            try:await prepare_local('parakeet' if engine=='hybrid-parakeet' else engine,formatter)
+            except Exception:pass # The next dictation reports real model errors.
+        prewarm_task=asyncio.create_task(run())
+    return {'started':True}
+
 @app.post('/api/clip')
 async def clip(request:Request):
     engine=request.query_params.get('engine','parakeet');formatter=request.query_params.get('formatter','local');style=request.query_params.get('style','bericht');paragraphs=request.query_params.get('paragraphs','normaal')
@@ -192,7 +208,7 @@ async def record(ws:WebSocket):
         await ws.close(code=1008);return
     await ws.accept()
     if gate.locked():await ws.send_json({'type':'error','message':'Er loopt al een proef.'});await ws.close();return
-    stream=None
+    stream=None;waking=None
     async with gate:
         try:
             cfg=await asyncio.wait_for(ws.receive_json(),10)
@@ -204,6 +220,7 @@ async def record(ws:WebSocket):
                 stream=CloudStream(engine,partial);await stream.start()
             await prepare_local(engine,formatter)
             await ws.send_json({'type':'ready','max_seconds':MAX_SECONDS})
+            waking=asyncio.create_task(wake_local(engine,formatter))
             audio=bytearray(); began=time.perf_counter()
             while True:
                 msg=await asyncio.wait_for(ws.receive(),MAX_SECONDS+15)
@@ -252,6 +269,9 @@ async def record(ws:WebSocket):
             try:await ws.send_json({'type':'error','message':str(e) if isinstance(e,(ValueError,RuntimeError)) else 'De proef stopte door een verbindings- of opnamefout.'})
             except Exception:pass
         finally:
+            if waking:
+                if not waking.done():waking.cancel()
+                await asyncio.gather(waking,return_exceptions=True)
             if stream:await stream.close()
             try:await ws.close()
             except Exception:pass
