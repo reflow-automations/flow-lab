@@ -3,7 +3,7 @@ import ctypes as C
 from ctypes import wintypes as W
 import hashlib,queue,threading,time
 from concurrent.futures import Future
-from dataclasses import dataclass
+from dataclasses import dataclass,field
 from shortcut_config import shortcut,ShortcutEdges
 
 user=C.WinDLL('user32',use_last_error=True);kernel=C.WinDLL('kernel32',use_last_error=True);gdi=C.WinDLL('gdi32',use_last_error=True);winmm=C.WinDLL('winmm')
@@ -181,6 +181,7 @@ class Target:
     can_verify:bool=False
     native_edit:int=0
     native_selection:tuple=()
+    details:dict=field(default_factory=dict)
 
 def edit_selection(hwnd):
     start=W.DWORD();end=W.DWORD();result=SIZE()
@@ -194,38 +195,61 @@ def utf16_slice(text,start,end=None):
     data=text.encode('utf-16le')
     return data[start*2:None if end is None else end*2].decode('utf-16le')
 
+def belongs_to_window(uia,element,hwnd,details):
+    """Prove ancestry, including deeply nested browser editors without HWNDs."""
+    window=uia.ElementFromHandle(hwnd)
+    parent=element;seen=set()
+    for depth in range(128):
+        if not parent:
+            details['ancestry_result']='root_reached';return False
+        details['ancestry_depth']=depth
+        if uia.CompareElements(parent,window):
+            details['ancestry_result']='window_element';return True
+        handle=parent.CurrentNativeWindowHandle
+        if handle and ancestor(handle,2)==hwnd:
+            details['ancestry_result']='native_window';return True
+        runtime=tuple(parent.GetRuntimeId())
+        if runtime:
+            if runtime in seen:
+                details['ancestry_result']='cycle';return False
+            seen.add(runtime)
+        parent=uia.RawViewWalker.GetParentElement(parent)
+    details['ancestry_result']='depth_limit'
+    return False
+
 def capture_target(uia,U,hwnd):
     t=Target(hwnd)
     if foreground()!=hwnd:t.reason='Het actieve venster is gewijzigd';return t
     e=uia.GetFocusedElement()
     if not e:return t
+    t.details={'control_type':e.CurrentControlType,'class_name':e.CurrentClassName or '', 'enabled':bool(e.CurrentIsEnabled)}
     # Hosted browser controls may use another PID. Prove ancestry, not just PID equality.
-    parent=e;belongs=False
-    for _ in range(18):
-        if not parent:break
-        h=parent.CurrentNativeWindowHandle
-        if h and ancestor(h,2)==hwnd:belongs=True;break
-        parent=uia.RawViewWalker.GetParentElement(parent)
-    if not belongs:t.reason='Het actieve veld hoort bij een ander venster';return t
+    if not belongs_to_window(uia,e,hwnd,t.details):
+        t.reason='Kan het invoerveld niet aan het actieve venster koppelen. Tekst blijft bewaard.';return t
     if e.CurrentIsPassword:t.password=True;t.reason='Wachtwoordveld: opname niet gestart';return t
     name=(e.CurrentName or '').casefold()
     if 'terminal' in name:t.reason='Terminal: tekst straks zelf kopiëren';return t
     tp=pattern(e,U,'UIA_TextPatternId','IUIAutomationTextPattern');vp=pattern(e,U,'UIA_ValuePatternId','IUIAutomationValuePattern')
+    t.details.update(text_pattern=bool(tp),value_pattern=bool(vp))
     writable=bool(vp and not vp.CurrentIsReadOnly)
     if tp:
         readonly=tp.DocumentRange.GetAttributeValue(U.UIA_IsReadOnlyAttributeId)
         writable=writable or readonly is False
-    if not e.CurrentIsEnabled or not (writable or e.CurrentControlType==U.UIA_EditControlTypeId):return t
+    if not e.CurrentIsEnabled or not (writable or e.CurrentControlType==U.UIA_EditControlTypeId):
+        t.reason='Klik eerst in het tekstvak waar je wilt dicteren.';return t
     if not tp:
         native=e.CurrentNativeWindowHandle
-        if not native or (e.CurrentClassName or '').casefold()!='edit' or not vp:return t
+        if not native or (e.CurrentClassName or '').casefold()!='edit' or not vp:
+            t.reason='Dit tekstvak geeft de cursor nog niet door aan Windows.';return t
         start,end=edit_selection(native);text=vp.CurrentValue
         t.native_edit=native;t.native_selection=(start,end)
         t.prefix=norm(utf16_slice(text,0,start));t.suffix=norm(utf16_slice(text,end));t.can_verify=True
         t.editable=True;t.reason='Cursor vastgelegd';t.element=e;t.runtime=tuple(e.GetRuntimeId());t.before_hash=digest(text)
         return t
     selections=tp.GetSelection()
-    if selections.Length!=1:return t
+    t.details['selection_count']=selections.Length
+    if selections.Length!=1:
+        t.reason='De cursor of selectie in dit tekstvak is niet uitleesbaar.';return t
     selected=selections.GetElement(0)
     before=tp.DocumentRange.Clone();before.MoveEndpointByRange(1,selected,0)
     after=tp.DocumentRange.Clone();after.MoveEndpointByRange(0,selected,1)
@@ -254,8 +278,29 @@ def same_target(uia,U,t):
 
 def verify_target(uia,U,t,text):
     if not t.can_verify:return False
-    try:return norm(field_text(t.element,U)).rstrip('\n')==norm(t.prefix+text+t.suffix).rstrip('\n')
-    except Exception:return False
+    expected=norm(t.prefix+text+t.suffix).rstrip('\n')
+    try:
+        # Rich editors can replace their accessibility object after a paste.
+        # Resolve the same runtime ID again; never verify an unrelated field.
+        e=t.element
+        focused=uia.GetFocusedElement()
+        if focused and tuple(focused.GetRuntimeId())==t.runtime:e=focused
+        actual=norm(field_text(e,U)).rstrip('\n')
+        t.details.update(expected_length=len(expected),actual_length=len(actual))
+        if actual==expected:
+            t.details['verification']='text_pattern';return True
+        # Chromium editors may expose a fresher ValuePattern than TextPattern.
+        # Both must match the complete expected field, not just a substring.
+        value=pattern(e,U,'UIA_ValuePatternId','IUIAutomationValuePattern')
+        if value:
+            actual_value=norm(value.CurrentValue).rstrip('\n')
+            t.details['value_length']=len(actual_value)
+            if actual_value==expected:
+                t.details['verification']='value_pattern';return True
+        t.details['verification']='text_mismatch'
+        return False
+    except Exception:
+        t.details['verification']='provider_error';return False
 
 _open=api(user,'OpenClipboard',[W.HWND],W.BOOL);_close=api(user,'CloseClipboard',[],W.BOOL)
 _empty=api(user,'EmptyClipboard',[],W.BOOL);_enum=api(user,'EnumClipboardFormats',[W.UINT],W.UINT)
@@ -282,8 +327,13 @@ class ClipboardBackup:
         self.items=[];self.hwnd=hwnd
         open_clipboard(hwnd)
         try:
-            f=0
-            while f:=_enum(f):
+            f=0;formats=[]
+            while f:=_enum(f):formats.append(f)
+            # Preserve portable DIB bytes first. Windows synthesizes CF_BITMAP
+            # from these; some clipboard providers expose an unusable HBITMAP.
+            for f in sorted(formats,key=lambda fmt:fmt==2):
+                dib_saved=any(item[0] in (8,17) and item[1]=='bytes' and len(item[2])>=40 for item in self.items)
+                if f==2 and dib_saved:continue
                 h=_get(f)
                 if not h:raise OSError('Klembordformaat niet uitleesbaar')
                 if f==2:

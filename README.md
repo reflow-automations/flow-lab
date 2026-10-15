@@ -145,8 +145,8 @@ tik van maximaal 250 ms krijgt na loslaten 320 ms om een tweede druk te herkenne
 Een langere hold stopt direct bij loslaten. Maximaal 5 minuten per opname.
 
 **Sneltoets wijzigen:** open het tabblad **Instellingen** in de app, kies je
-combinatie en klik **Sneltoets opslaan**. Ga daarna naar **Dicteren** of verberg
-het venster; sneltoetsen pauzeren zolang Instellingen zichtbaar is. Het systeemvak-
+combinatie en klik **Sneltoets opslaan**. Sneltoetsen pauzeren alleen als het
+instellingenvenster zelf op de voorgrond staat. Het systeemvak-
 item **Sneltoets instellen...** opent hetzelfde tabblad, geen losse browserpagina.
 Ctrl+Windows zonder extra toets wordt ondersteund. Sluit andere dicteerapps zelf
 af als die dezelfde combinatie gebruiken. Een geweigerde registratie laat de
@@ -162,6 +162,17 @@ bij gewijzigd venster, cursor/selectie of tekst, wachtwoordvelden, een opmaakwaa
 of ontbrekende cursorinformatie. Kopieer het resultaat dan zelf. Er wordt geen Enter
 verstuurd. Het klembord wordt hersteld zolang een andere toepassing het niet heeft
 gewijzigd. Niet alle tekstvakken, terminals en verhoogde apps worden ondersteund.
+
+**Plaatsingsstatus en snelheid:** het vak **Kopie van laatste resultaat** toont
+altijd een kopie, ook wanneer invoegen niet lukt. De status erboven vermeldt of
+plaatsing bevestigd is, met de tijd vanaf stoppen/loslaten tot die bevestiging.
+Dit is iets anders dan alleen de rekentijd van herkenning en opmaak. De eerste
+opname na een modelstart kan extra laadtijd hebben. Bij wachten op de lokale
+modellen verschijnt een laadmelding; de opname blijft ondertussen in geheugen.
+Foutmeldingen blijven 15 seconden in het balkje staan en zijn daarna terug te
+lezen in de app, ook na herstart. Alleen de nieuwste plaatsingsdiagnose en
+tijdsmetingen worden lokaal bewaard in `logs/desktop-last-insertion.json`;
+die diagnose bevat geen dictaattekst of klembordinhoud.
 
 ## Snippets, woordenboek en geschiedenis
 

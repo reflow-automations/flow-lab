@@ -68,6 +68,8 @@ class Recording:
         self.stop = threading.Event()
         self.cancel = threading.Event()
         self.started = time.monotonic()
+        self.timings={}
+        self.released_at=None
         self.last_sound = self.started
         self.mic = None
         threading.Thread(target=self.run, daemon=True).start()
@@ -101,6 +103,7 @@ class Recording:
                 self.mic = w.Microphone(self.push)
                 self.mic.start()
                 capture_started=time.monotonic()
+                self.timings['microphone_ready_ms']=round((capture_started-self.started)*1000,1)
                 self.emit('listening')
                 while not self.stop.wait(.04) and not self.cancel.is_set():
                     if time.monotonic() - capture_started >= MAX_SECONDS+2:
@@ -128,6 +131,7 @@ class Recording:
                         await asyncio.sleep(.015)
                         continue
                     if data is None:
+                        self.timings['audio_sent_ms']=round((time.monotonic()-self.started)*1000,1)
                         await socket.send(json.dumps({'type': 'stop'}))
                         self.emit('processing')
                         return
@@ -139,10 +143,18 @@ class Recording:
                 while time.monotonic() < deadline:
                     if self.cancel.is_set(): return
                     try: message = json.loads(await asyncio.wait_for(socket.recv(), .2))
-                    except asyncio.TimeoutError: continue
+                    except asyncio.TimeoutError:
+                        if not ready and time.monotonic()-self.started>1:self.emit('preparing')
+                        continue
                     kind = message.get('type')
-                    if kind == 'ready': ready = True
+                    if kind == 'ready':
+                        ready = True
+                        self.timings['backend_ready_ms']=round((time.monotonic()-self.started)*1000,1)
                     elif kind == 'done':
+                        self.timings['result_ready_ms']=round((time.monotonic()-self.started)*1000,1)
+                        self.timings['backend_processing_ms']=message.get('after_stop_ms')
+                        if self.released_at is not None:
+                            self.timings['release_to_result_ms']=round((time.monotonic()-self.released_at)*1000,1)
                         self.emit('result', message)
                         return
                     elif kind == 'error': raise RuntimeError(message.get('message') or message.get('error') or 'Verwerking mislukt')
@@ -168,6 +180,9 @@ class Desktop:
         self.config = settings()
         self.test = test
         self.current = None
+        self.last_insertion_message='Dit is een kopie van je laatste tekst. De plaatsingsstatus verschijnt na het dicteren.'
+        try:self.last_insertion_message=json.loads((ROOT/'data/desktop-last-status.json').read_text(encoding='utf-8'))['message']
+        except (OSError,ValueError,KeyError):pass
         self.ident = 0
         self.last_text = ''
         self.state = 'idle'
@@ -288,7 +303,9 @@ class Desktop:
 
     def settings_are_open(self):
         window=getattr(self,'control_window',None)
-        return bool(window and window.exists() and window.root.state()!='withdrawn' and window.notebook.select() in (str(window.tabs['settings']),str(window.tabs['openrouter'])))
+        return bool(window and window.exists() and window.root.state()!='withdrawn' and
+                    w.foreground()==w.ancestor(window.root.winfo_id(),2) and
+                    window.notebook.select() in (str(window.tabs['settings']),str(window.tabs['openrouter'])))
 
     def start(self):
         if self.current or self.state!='idle': return
@@ -296,6 +313,8 @@ class Desktop:
         self.ident += 1
         ident = self.ident
         hwnd = w.foreground()
+        self.capture_started=time.monotonic()
+        self.released_at=None
         self.state = 'starting'
         self.hotkeys.command('escape', True)
         self.display('Cursor controleren...')
@@ -307,9 +326,12 @@ class Desktop:
 
     def stop(self):
         if self.state in ('recording','starting'):
+            self.released_at=time.monotonic()
             self.stop_requested=True;self.gesture.mode='processing'
             self.state='processing'
-            if self.current:self.current.stop.set()
+            if self.current:
+                self.current.released_at=self.released_at
+                self.current.stop.set()
             self.display('Tekst opmaken...')
 
     def gesture_actions(self,actions):
@@ -325,6 +347,9 @@ class Desktop:
             self.display(target.reason);self.hide_later();return
         fixture=ROOT/'recordings/synthetic/desktop-test-short.wav' if self.test else None
         self.current=Recording(self,self.ident,target,fixture)
+        if hasattr(self.current,'timings'):
+            self.current.timings['target_capture_ms']=round((time.monotonic()-getattr(self,'capture_started',time.monotonic()))*1000,1)
+        self.current.released_at=getattr(self,'released_at',None)
         if self.stop_requested:
             self.current.stop.set();self.state='processing';self.display('Tekst opmaken...')
         else:
@@ -334,6 +359,7 @@ class Desktop:
     def replay(self):
         if self.state!='idle': return
         self.ident+=1; ident=self.ident; hwnd=w.foreground()
+        self.replay_started=time.monotonic()
         self.state='starting'; self.hotkeys.command('escape',True)
         self.display('Laatste tekst ophalen...')
         def prepare():
@@ -356,9 +382,17 @@ class Desktop:
         self.display('Geannuleerd')
         self.hide_later()
 
-    def hide_later(self):
+    def hide_later(self,delay_ms=3500):
         ident = self.ident
-        self.root.after(3500, lambda: w.show(self.hwnd, 0) if self.ident==ident and not self.current else None)
+        self.root.after(delay_ms, lambda: w.show(self.hwnd, 0) if self.ident==ident and not self.current else None)
+
+    def remember_status(self,message):
+        self.last_insertion_message=message
+        window=getattr(self,'control_window',None)
+        if window and window.exists():window.insertion_message.set(message)
+        try:
+            (ROOT/'data/desktop-last-status.json').write_text(json.dumps({'message':message},ensure_ascii=False),encoding='utf-8')
+        except OSError:pass
 
     def copy(self):
         if self.last_text:
@@ -367,9 +401,10 @@ class Desktop:
             self.hide_later()
 
     def insert(self, session, result):
+        began=time.monotonic()
         text = result.get('text', '')
         backup = None; own_sequence = None
-        ok = False; reason = 'Geen tekst ontvangen'
+        ok = False; paste_sent=False; reason = 'Geen tekst ontvangen'
         try:
             if not text: return
             if result.get('warning'):
@@ -391,6 +426,10 @@ class Desktop:
             if session.cancel.is_set() or w.foreground()!=session.target.hwnd:
                 reason='Invoegen geannuleerd'; return
             if not w.paste_once(): reason='Windows weigerde invoegen: zelf kopiëren'; return
+            paste_sent=True
+            if hasattr(session,'timings'):
+                released=getattr(session,'released_at',None)
+                if released is not None:session.timings['release_to_paste_sent_ms']=round((time.monotonic()-released)*1000,1)
             # Wait for the target to consume Ctrl+V before restoring the clipboard.
             for _ in range(12):
                 time.sleep(.05)
@@ -405,7 +444,25 @@ class Desktop:
                     if self.test and own_sequence is not None: self.tests['clipboard_restored']=restored
                 except Exception: reason += ' (klembordherstel mislukt)'
                 finally: backup.dispose()
+            if hasattr(session,'timings'):
+                session.timings['insertion_ms']=round((time.monotonic()-began)*1000,1)
+                released=getattr(session,'released_at',None)
+                if released is not None:
+                    session.timings['release_to_outcome_ms']=round((time.monotonic()-released)*1000,1)
+                    if ok:session.timings['release_to_verified_ms']=session.timings['release_to_outcome_ms']
+            if hasattr(self,'record_insertion'):self.record_insertion(session,ok,reason,paste_sent)
             self.events.put(('inserted', session.ident, ok, reason))
+
+    def record_insertion(self,session,ok,reason,paste_sent):
+        target=getattr(session,'target',None)
+        report={'time':time.time(),'status':'verified' if ok else 'paste_sent_unverified' if paste_sent else 'blocked',
+                'reason':reason,'target_hwnd':getattr(target,'hwnd',None),'target_editable':getattr(target,'editable',False),
+                'capture_reason':getattr(target,'reason',''),'capabilities':getattr(target,'details',{}),
+                'timings':getattr(session,'timings',{})}
+        try:
+            (ROOT/'logs').mkdir(exist_ok=True)
+            (ROOT/'logs/desktop-last-insertion.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+        except OSError:pass
 
     def poll(self):
         try:
@@ -477,8 +534,11 @@ class Desktop:
                     target,text=args
                     self.last_text=text
                     if not target.editable or target.password:
-                        self.state='idle'; self.hotkeys.command('escape',False); self.display(target.reason); self.hide_later(); continue
-                    self.current=SimpleNamespace(ident=self.ident,target=target,cancel=threading.Event(),stop=threading.Event())
+                        self.record_insertion(SimpleNamespace(target=target),False,target.reason,False)
+                        self.remember_status(target.reason+' Je tekst blijft in Flow Lab beschikbaar.')
+                        self.state='idle'; self.hotkeys.command('escape',False); self.display(target.reason); self.hide_later(15000); continue
+                    self.current=SimpleNamespace(ident=self.ident,target=target,cancel=threading.Event(),stop=threading.Event(),
+                                                 timings={},released_at=None)
                     self.state='inserting'; self.display('Laatste tekst plaatsen...')
                     threading.Thread(target=self.insert,args=(self.current,{'text':text}),daemon=True).start()
                 elif kind == 'captured':
@@ -493,19 +553,26 @@ class Desktop:
                 elif kind == 'source_done':
                     if self.test:self.gesture_actions(self.gesture.feed('up',time.monotonic()))
                     else:self.stop()
+                elif kind == 'preparing':
+                    if self.state=='processing':self.display('Lokale modellen laden. Je opname blijft bewaard.')
                 elif kind == 'processing': self.state='processing'; self.display('Tekst opmaken...')
                 elif kind == 'result':
                     self.last_text=args[0].get('text',''); self.state='inserting'; self.display('Tekst plaatsen...')
                     threading.Thread(target=self.insert,args=(self.current,args[0]),daemon=True).start()
                 elif kind == 'inserted':
+                    timing=getattr(self.current,'timings',{}).get('release_to_verified_ms')
+                    message='Geplaatst in het gekozen tekstvak.' if args[0] else args[1]+' Je tekst blijft hieronder beschikbaar.'
+                    if args[0] and timing is not None:message+=f' {timing/1000:.2f} s van loslaten tot bevestigd plaatsen.'
+                    self.remember_status(message)
                     self.gesture.reset()
-                    self.current=None; self.state='idle'; self.hotkeys.command('escape',False); self.display(args[1]); self.hide_later()
+                    self.current=None; self.state='idle'; self.hotkeys.command('escape',False); self.display(args[1]); self.hide_later(3500 if args[0] else 15000)
                     if self.control_window and self.control_window.exists() and self.control_window.root.state()!='withdrawn':self.control_window.refresh_selected()
                     if self.test: self.tests['audio_to_insert']=args[0]; self.finish_test()
                 elif kind == 'error':
+                    self.remember_status('Niet geplaatst: '+args[0])
                     self.gesture.reset()
                     if self.current: self.current.cancel.set(); self.current.stop.set()
-                    self.current=None; self.state='idle'; self.hotkeys.command('escape',False); self.display(args[0][:95]); self.hide_later()
+                    self.current=None; self.state='idle'; self.hotkeys.command('escape',False); self.display(args[0][:95]); self.hide_later(15000)
                     if self.test: self.tests['error']=args[0]; self.finish_test()
             self.gesture_actions(self.gesture.tick(time.monotonic()))
             self.overlay.render(self.state,self.levels,self.gesture.mode=='locked')

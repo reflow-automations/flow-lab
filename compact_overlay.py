@@ -22,7 +22,7 @@ class CompactOverlay:
     def layout(self):
         detail=self.hover or (self.state=='idle' and self.text not in ('','Ingevoegd','Geannuleerd'))
         width=350 if detail else self.WIDTH
-        height=64 if detail else self.HEIGHT
+        height=(96 if self.state=='idle' and len(self.text)>60 else 64) if detail else self.HEIGHT
         self.canvas.configure(width=width,height=height)
         self.root.geometry(f'{width}x{height}+{(self.root.winfo_screenwidth()-width)//2}+{self.root.winfo_screenheight()-height-58}')
         self.width=width;self.height=height
@@ -77,5 +77,6 @@ class CompactOverlay:
         c.create_line(offset+133,18,offset+137,22,offset+144,14,fill='#1d2b21',width=2)
         if self.height>self.HEIGHT:
             c.move('all',0,self.height-self.HEIGHT)
-            self.rounded(0,0,self.width-1,24,'#242b26')
-            c.create_text(self.width/2,12,text=self.text[:67],fill='#e4e9e5',font=('Segoe UI',9))
+            detail_height=self.height-self.HEIGHT-4
+            self.rounded(0,0,self.width-1,detail_height,'#242b26')
+            c.create_text(self.width/2,detail_height/2,text=self.text,width=self.width-24,fill='#e4e9e5',font=('Segoe UI',9))

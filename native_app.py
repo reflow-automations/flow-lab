@@ -166,7 +166,9 @@ class NativeApp:
         def explain_home(*_):self.home_model_hint.set(self.model_guide['desktop'][self.mode_choices[self.mode.get()]])
         self.mode.trace_add('write',explain_home);explain_home()
         ttk.Label(tab,textvariable=self.home_model_hint,wraplength=820).pack(anchor='w',pady=(8,20))
-        ttk.Label(tab,text='Laatste resultaat',font=('Segoe UI',12,'bold')).pack(anchor='w')
+        ttk.Label(tab,text='Kopie van laatste resultaat',font=('Segoe UI',12,'bold')).pack(anchor='w')
+        self.insertion_message=tk.StringVar(value=getattr(self.app,'last_insertion_message',''))
+        ttk.Label(tab,textvariable=self.insertion_message,wraplength=850).pack(anchor='w',pady=(4,0))
         self.latest=tk.Text(tab,height=8,wrap='word',font=('Segoe UI',11),padx=12,pady=12)
         self.latest.pack(fill='both',expand=True,pady=8)
         ttk.Button(tab,text='Laatste resultaat kopiëren',command=lambda:self.copy(self.latest.get('1.0','end-1c'))).pack(anchor='e')
@@ -183,6 +185,7 @@ class NativeApp:
         ttk.Button(dialog,text='Sluiten',command=dialog.destroy).pack(pady=(0,12))
 
     def refresh_home(self):
+        self.insertion_message.set(getattr(self.app,'last_insertion_message',''))
         self.shortcut_text.set(shortcut_label(self.app.config['hotkey'])+'  |  Dicteren')
         import desktop_windows as w
         key=w.REPLAY_KEYS.get(self.app.replay_key,(None,None,'Geen vrije sneltoets'))[2]
@@ -192,7 +195,9 @@ class NativeApp:
             if not error:self.status.set('Lokale verwerking actief. '+('Er wordt momenteel verwerkt.' if data['busy'] else 'Klaar om te dicteren.'))
         self.request('/api/status',status)
         def latest(data,error):
-            if not error:set_text(self.latest,data['items'][0]['text'] if data['items'] else '')
+            if not error:
+                set_text(self.latest,data['items'][0]['text'] if data['items'] else '')
+                self.latest.configure(state='disabled')
         self.request('/api/history?limit=1',latest)
 
     def copy(self,text):
