@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+while read -r local_ref local_sha remote_ref remote_sha
+do
+    case "$local_sha" in
+        0000000000000000000000000000000000000000) continue ;;
+    esac
+    py publication_guard.py --git-ref "$local_sha"
+done

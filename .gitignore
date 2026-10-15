@@ -1,0 +1,25 @@
+.env*
+!.env.example
+.venv/
+__pycache__/
+.pytest_cache/
+models/
+recordings/
+results/
+logs/
+runtime/
+data/
+backups/
+desktop/bin/
+desktop/obj/
+
+# Local research, personal handover and generated share packages.
+/AGENTS.md
+/TESTRESULTATEN.md
+/*.local.md
+/model-manifest.json
+/desktop-build-toolchain.json
+/desktop/
+/flow-lab-preview.jpg
+/history-v2-preview.jpg
+/releases/

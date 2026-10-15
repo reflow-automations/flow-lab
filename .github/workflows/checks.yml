@@ -1,0 +1,23 @@
+name: Public source checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Check committed public files
+        run: py publication_guard.py --git-ref HEAD
+      - name: Install test dependencies
+        run: py -3.12 -m pip install -r requirements.lock.txt
+      - name: Test without microphone, cloud calls or model downloads
+        run: py -3.12 -m pytest -q --tb=short
+      - name: Check audio worklet
+        run: node test_recorder.cjs

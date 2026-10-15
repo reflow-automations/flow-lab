@@ -1,0 +1,44 @@
+[
+  {
+    "kind": "runtime",
+    "repo": "ggml-org/llama.cpp",
+    "revision": "b11658",
+    "file": "llama-b11658-bin-win-vulkan-x64.zip",
+    "sha256": "3d6951c3ff249099b926980e3330f92ff34888d27c6f65fae4061e736c0fb689"
+  },
+  {
+    "kind": "model",
+    "repo": "nvidia/parakeet-tdt-0.6b-v3",
+    "revision": "541d1f99c6b0c3cd0b11a95167540bb8edefd82b",
+    "file": "parakeet-tdt-0.6b-v3.q8_0.gguf",
+    "sha256": "e3880d0aaaaf2c308ea2c35016b2b895c423eb3fda924c1b463d1c19b7f4d32e"
+  },
+  {
+    "kind": "model",
+    "repo": "ggerganov/whisper.cpp",
+    "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+    "file": "ggml-large-v3-turbo-q5_0.bin",
+    "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2"
+  },
+  {
+    "kind": "runtime",
+    "repo": "NVIDIA/NeMo-Speech.cpp",
+    "revision": "v0.2.0",
+    "file": "nemo-speech-0.2.0-windows-x86_64-cuda.zip",
+    "sha256": "9ffe5e842c39a7d3211f3b2c3b3aa1bca8c0b2455d96d961ed5f22ec5108f98d"
+  },
+  {
+    "kind": "runtime",
+    "repo": "ggml-org/whisper.cpp",
+    "revision": "b5454",
+    "file": "whisper-bin-win-cuda-12.4.0-x64.zip",
+    "sha256": "afef0b881c500958921c3f5523b50e59ee2ec9b6f5cbd25b324c51ed308a957a"
+  },
+  {
+    "kind": "model",
+    "repo": "bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF",
+    "revision": "ae44f08e1392f39c0e474af10c3ff8355c8b6688",
+    "file": "Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+    "sha256": "2fde00ce69dd4899c70d020845e2638353015bba0fdf161b3eb965f2bca4464e"
+  }
+]

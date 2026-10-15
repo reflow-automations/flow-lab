@@ -1,0 +1,7 @@
+{
+  "replacements": {
+    "webhoek": "webhook",
+    "superbase": "Supabase"
+  },
+  "note": "Specifieke technische herkenningsvarianten. Geen automatische vervanging van persoonsnamen. Bewerk deze lijst voor je eigen woordgebruik."
+}
