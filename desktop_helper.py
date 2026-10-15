@@ -431,10 +431,17 @@ class Desktop:
                 released=getattr(session,'released_at',None)
                 if released is not None:session.timings['release_to_paste_sent_ms']=round((time.monotonic()-released)*1000,1)
             # Wait for the target to consume Ctrl+V before restoring the clipboard.
+            complete=False
             for _ in range(12):
                 time.sleep(.05)
                 if self.uia.submit(w.verify_target, session.target, text).result(timeout=.5): ok=True; break
-            reason='Ingevoegd' if ok else 'Plakken verstuurd; controleer het tekstvak'
+                if getattr(session.target,'details',{}).get('whole_field_equals_dictation'):
+                    complete=True
+                    if hasattr(session,'timings') and getattr(session,'released_at',None) is not None:
+                        session.timings['release_to_complete_text_ms']=round((time.monotonic()-session.released_at)*1000,1)
+                    break # Exact full dictation proves clipboard consumption, not surrounding-text preservation.
+            reason=('Ingevoegd' if ok else 'Volledige dictatie geplaatst; controleer eventuele bestaande tekst.' if complete
+                    else 'Plakken verstuurd; controleer het tekstvak')
         except Exception as exc:
             reason='Niet ingevoegd: '+str(exc)[:105]
         finally:
@@ -459,6 +466,8 @@ class Desktop:
                 'reason':reason,'target_hwnd':getattr(target,'hwnd',None),'target_editable':getattr(target,'editable',False),
                 'capture_reason':getattr(target,'reason',''),'capabilities':getattr(target,'details',{}),
                 'timings':getattr(session,'timings',{})}
+        if not ok and paste_sent and report['capabilities'].get('whole_field_equals_dictation'):
+            report['status']='complete_dictation_context_unverified'
         try:
             (ROOT/'logs').mkdir(exist_ok=True)
             (ROOT/'logs/desktop-last-insertion.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')

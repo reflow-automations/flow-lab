@@ -197,3 +197,71 @@ def test_clipboard_image_preserves_dib_without_invalid_bitmap_handle(monkeypatch
     monkeypatch.setattr(w,'put_memory',lambda fmt,payload:restored.append((fmt,payload)))
     assert backup.restore(5)
     assert restored==[(8,data.raw[:80])]
+
+def test_rich_editor_value_takes_precedence_over_placeholder(monkeypatch):
+    value=NS(CurrentValue='')
+    text=NS(DocumentRange=NS(GetText=lambda _:'Synthetic placeholder'))
+    monkeypatch.setattr(w,'pattern',lambda e,U,name,interface:value if name=='UIA_ValuePatternId' else text)
+    assert w.field_text(None,None)==''
+    value.CurrentValue='Complete text.\n\nSecond paragraph.'
+    assert w.field_text(None,None)=='Complete text.\n\nSecond paragraph.'
+
+def test_verification_reports_complete_dictation_without_weakening_full_match(monkeypatch):
+    element=NS(GetRuntimeId=lambda:(1,))
+    target=w.Target(10,can_verify=True,element=element,runtime=(1,),prefix='Required prefix ')
+    monkeypatch.setattr(w,'field_text',lambda *_:'First paragraph.\n\nSecond paragraph.')
+    monkeypatch.setattr(w,'pattern',lambda *_:None)
+    uia=NS(GetFocusedElement=lambda:element)
+    assert not w.verify_target(uia,None,target,'First paragraph.\n\nSecond paragraph.')
+    assert target.details['complete_dictation_present']
+    assert target.details['whole_field_equals_dictation']
+    assert target.details['verification']=='text_mismatch'
+
+def test_empty_rich_editor_does_not_count_placeholder_as_surrounding_text(monkeypatch):
+    class Range:
+        def Clone(self):return Range()
+        def GetText(self,_):return 'Synthetic placeholder'
+        def GetAttributeValue(self,_):return False
+        def MoveEndpointByRange(self,*_):pass
+    tp=NS(DocumentRange=Range(),GetSelection=lambda:NS(Length=1,GetElement=lambda _:Range()))
+    vp=NS(CurrentValue='',CurrentIsReadOnly=False)
+    element=NS(CurrentControlType=50004,CurrentClassName='RichEditor',CurrentIsEnabled=True,
+               CurrentIsPassword=False,CurrentName='',GetRuntimeId=lambda:(1,))
+    uia=NS(GetFocusedElement=lambda:element)
+    U=NS(UIA_IsReadOnlyAttributeId=1,UIA_EditControlTypeId=50004)
+    monkeypatch.setattr(w,'foreground',lambda:10)
+    monkeypatch.setattr(w,'belongs_to_window',lambda *_:True)
+    monkeypatch.setattr(w,'pattern',lambda e,U,name,interface:vp if name=='UIA_ValuePatternId' else tp)
+    target=w.capture_target(uia,U,10)
+    assert target.editable and target.can_verify
+    assert target.prefix==target.suffix==''
+    assert target.before_hash==w.digest('')
+    assert target.details['before_length']==0
+
+def test_complete_dictation_stops_retry_without_claiming_surrounding_text_preserved(monkeypatch,tmp_path):
+    import desktop_helper as d
+    monkeypatch.setattr(d,'ROOT',tmp_path)
+    checks=[]
+    class Worker:
+        def submit(self,fn,*args):
+            future=Future()
+            if fn is w.same_target:future.set_result((True,''))
+            else:
+                checks.append(1);args[0].details['whole_field_equals_dictation']=True;future.set_result(False)
+            return future
+    backup=NS(sequence=1,restore=lambda _:True,dispose=lambda:None)
+    monkeypatch.setattr(w,'ClipboardBackup',lambda _:backup)
+    monkeypatch.setattr(w,'modifiers_held',lambda:False)
+    monkeypatch.setattr(w,'clipboard_sequence',lambda:1)
+    monkeypatch.setattr(w,'copy_text',lambda *_:2)
+    monkeypatch.setattr(w,'foreground',lambda:10)
+    monkeypatch.setattr(w,'paste_once',lambda:True)
+    app=NS(events=queue.Queue(),hwnd=1,test=False,uia=Worker())
+    app.record_insertion=lambda *args:Desktop.record_insertion(app,*args)
+    session=NS(ident=1,target=w.Target(10,editable=True),cancel=threading.Event(),timings={},released_at=d.time.monotonic())
+    Desktop.insert(app,session,{'text':'All sentences.'})
+    report=d.json.loads((tmp_path/'logs/desktop-last-insertion.json').read_text(encoding='utf-8'))
+    assert len(checks)==1
+    assert report['status']=='complete_dictation_context_unverified'
+    assert 'release_to_complete_text_ms' in report['timings']
+    assert 'release_to_verified_ms' not in report['timings']

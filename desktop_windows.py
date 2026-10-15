@@ -161,10 +161,11 @@ def pattern(e,U,name,interface):
     try:return e.GetCurrentPattern(getattr(U,name)).QueryInterface(getattr(U,interface))
     except Exception:return None
 def field_text(e,U):
+    v=pattern(e,U,'UIA_ValuePatternId','IUIAutomationValuePattern')
+    if v:return v.CurrentValue
     p=pattern(e,U,'UIA_TextPatternId','IUIAutomationTextPattern')
     if p:return p.DocumentRange.GetText(40001)
-    v=pattern(e,U,'UIA_ValuePatternId','IUIAutomationValuePattern')
-    return v.CurrentValue if v else ''
+    return ''
 
 @dataclass
 class Target:
@@ -254,7 +255,12 @@ def capture_target(uia,U,hwnd):
     before=tp.DocumentRange.Clone();before.MoveEndpointByRange(1,selected,0)
     after=tp.DocumentRange.Clone();after.MoveEndpointByRange(0,selected,1)
     t.prefix=norm(before.GetText(20001));t.suffix=norm(after.GetText(20001));t.can_verify=len(t.prefix)<=20000 and len(t.suffix)<=20000
-    t.editable=True;t.reason='Cursor vastgelegd';t.element=e;t.runtime=tuple(e.GetRuntimeId());t.selected=selected.Clone();t.before_hash=digest(field_text(e,U))
+    text=field_text(e,U)
+    # Empty rich editors may expose hint/placeholder text through TextPattern
+    # ranges while their actual ValuePattern is empty. It is not existing content.
+    if vp and vp.CurrentValue=='':t.prefix='';t.suffix='';t.can_verify=True
+    t.details.update(before_length=len(text),prefix_length=len(t.prefix),suffix_length=len(t.suffix))
+    t.editable=True;t.reason='Cursor vastgelegd';t.element=e;t.runtime=tuple(e.GetRuntimeId());t.selected=selected.Clone();t.before_hash=digest(text)
     return t
 
 def same_target(uia,U,t):
@@ -287,6 +293,9 @@ def verify_target(uia,U,t,text):
         if focused and tuple(focused.GetRuntimeId())==t.runtime:e=focused
         actual=norm(field_text(e,U)).rstrip('\n')
         t.details.update(expected_length=len(expected),actual_length=len(actual))
+        dictated=norm(text).rstrip('\n')
+        t.details.update(whole_field_equals_dictation=actual==dictated,
+                         complete_dictation_present=bool(dictated and dictated in actual))
         if actual==expected:
             t.details['verification']='text_pattern';return True
         # Chromium editors may expose a fresher ValuePattern than TextPattern.

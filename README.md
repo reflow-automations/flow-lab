@@ -173,6 +173,11 @@ Foutmeldingen blijven 15 seconden in het balkje staan en zijn daarna terug te
 lezen in de app, ook na herstart. Alleen de nieuwste plaatsingsdiagnose en
 tijdsmetingen worden lokaal bewaard in `logs/desktop-last-insertion.json`;
 die diagnose bevat geen dictaattekst of klembordinhoud.
+Sommige chatvelden melden via Windows extra hinttekst. Flow Lab controleert
+daarom apart of de volledige dictatie exact terug te lezen is. Als dat lukt maar
+de bestaande tekst rondom de cursor niet klopt met de verwachting, meldt de app
+dat de dictatie compleet is en vraagt zij de eventuele bestaande tekst te controleren.
+Er wordt dan niet opnieuw geplakt en niet onnodig op dezelfde controle gewacht.
 
 ## Snippets, woordenboek en geschiedenis
 
