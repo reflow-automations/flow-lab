@@ -7,11 +7,11 @@ from scipy.signal import resample_poly
 from websockets.asyncio.client import connect
 import storage
 from personalization import dictionary_replace,protect_snippets,restore_snippets,paragraph_layout
+from limits import MAX_SECONDS,MAX_WAV_BYTES,MAX_TEXT_CHARS,FORMAT_CHUNK_CHARS,LIMIT_MESSAGE,split_format_text
 
 ROOT=Path(__file__).resolve().parent
 MODELS=ROOT/'models'
 APP_PORT=int(os.environ.get('FLOW_LAB_PORT','17865'))
-MAX_SECONDS=90
 ASR_MODELS={'cloud-live':'gpt-live-transcribe','cloud-full':'gpt-4o-transcribe','cloud-mini':'gpt-4o-mini-transcribe'}
 FORMAT_MODELS={'cloud-mini':'gpt-4.1-mini-2025-04-14','cloud-nano':'gpt-4.1-nano-2025-04-14'}
 DICTIONARY='webhook, API, callback, deployment'
@@ -28,12 +28,12 @@ def pcm_wav(pcm:bytes, rate=24000):
     return f.getvalue()
 
 def read_wav(data:bytes, rate=24000):
-    if len(data)>20*1024*1024: raise ValueError('Audiobestand is te groot.')
+    if len(data)>MAX_WAV_BYTES: raise ValueError('Audiobestand is te groot.')
     with wave.open(io.BytesIO(data),'rb') as w:
         channels=w.getnchannels(); width=w.getsampwidth(); source=w.getframerate()
         if width!=2 or channels not in (1,2) or not 8000<=source<=96000: raise ValueError('Gebruik een 16-bit mono- of stereo-WAV.')
         data=w.readframes(source*MAX_SECONDS+1)
-        if len(data)/(width*channels*source)>MAX_SECONDS:raise ValueError('De proef ondersteunt maximaal 90 seconden.')
+        if len(data)/(width*channels*source)>MAX_SECONDS:raise ValueError(LIMIT_MESSAGE)
         x=np.frombuffer(data,dtype='<i2').astype(np.float32)/32768
     if channels==2: x=x.reshape(-1,2).mean(axis=1)
     if source!=rate:
@@ -71,6 +71,9 @@ def content_guard(raw,formatted):
     lexical_output=re.sub(r'^\s*\d+[.)]\s+','',formatted,flags=re.M)
     output=re.findall(r"[\w]+",lexical_output.casefold())
     if not output:return 'empty'
+    # Long dictation must not turn into a summary, even when passages repeat.
+    raw_words=re.findall(r"[\w]+",raw.casefold())
+    if len(raw_words)>=40 and len(output)<len(raw_words)*.65:return 'contracted'
     if number_guard(raw,formatted):return 'new_number'
     if len(formatted)>max(120,len(raw)*1.8):return 'expanded'
     for term in ['niet','misschien','onzeker']:
@@ -112,7 +115,7 @@ class LocalWorkers:
                 args=[str(exe),'serve','--host','127.0.0.1','--port',str(port),'--asr-model',str(MODELS/'parakeet-tdt-0.6b-v3.q8_0.gguf'),'--device','cuda:0','--api-key',self.token,'--no-ui','--max-upload-mb','20']
             elif name=='local':
                 exe=self.executable('llama','llama-server.exe')
-                args=[str(exe),'-m',str(MODELS/'Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf'),'--host','127.0.0.1','--port',str(port),'-c','4096','-ngl','99','-np','1','--api-key',self.token,'--reasoning','off','--jinja']
+                args=[str(exe),'-m',str(MODELS/'Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf'),'--host','127.0.0.1','--port',str(port),'-c','8192','-ngl','99','-np','1','--api-key',self.token,'--reasoning','off','--jinja']
             else:
                 exe=self.executable('whisper','whisper-server.exe')
                 args=[str(exe),'-m',str(MODELS/'ggml-large-v3-turbo-q5_0.bin'),'--host','127.0.0.1','--port',str(port),'-l','nl','-t','6','-fa','-mc','0','--request-path','/'+self.token]
@@ -149,7 +152,7 @@ async def local_transcribe(pcm,engine):
     wav=pcm_wav(audio,16000)
     route='/v1/audio/transcriptions' if engine=='parakeet' else '/'+workers.token+'/inference'
     data={'language':'nl','response_format':'json','temperature':'0'}
-    async with httpx.AsyncClient(timeout=90,trust_env=False) as c:
+    async with httpx.AsyncClient(timeout=180,trust_env=False) as c:
         r=await c.post(url+route,files={'file':('speech.wav',wav,'audio/wav')},data=data,headers={'Authorization':'Bearer '+workers.token})
         if r.status_code!=200: raise RuntimeError(f'{engine} gaf HTTP {r.status_code}.')
         return r.json().get('text','').strip()
@@ -169,7 +172,7 @@ async def prepare_local(engine,formatter):
 async def _format_text_base(text,engine='cloud-mini',style='bericht',debug=False):
     text=text.strip()
     if not text:return {'text':'','ms':0,'warning':None}
-    if len(text)>12000: raise ValueError('Tekst is te lang voor deze proef.')
+    if len(text)>MAX_TEXT_CHARS: raise ValueError('Tekst is te lang voor deze proef.')
     literal=re.match(r'^type letterlijk\s*[:;,]?\s+(.+)$',text,re.I|re.S)
     if literal:
         result=clean_layout(literal[1]);result=result[0].upper()+result[1:]
@@ -177,6 +180,12 @@ async def _format_text_base(text,engine='cloud-mini',style='bericht',debug=False
         return {'text':result,'ms':0,'warning':None}
     if engine=='verbatim':return {'text':clean_layout(text),'ms':0,'warning':None}
     if engine not in (*FORMAT_MODELS,'local'): raise ValueError('Onbekende opmaakmotor.')
+    if len(text)>FORMAT_CHUNK_CHARS:
+        start=time.perf_counter();pieces=[]
+        for part in split_format_text(text):pieces.append(await _format_text_base(part,engine,style,debug))
+        warning=next((p['warning'] for p in pieces if p.get('warning')),None)
+        result=text if warning else '\n\n'.join(p['text'] for p in pieces)
+        return {'text':result,'ms':round((time.perf_counter()-start)*1000,1),'warning':warning}
     text=dictionary_replace(text)
     start=time.perf_counter()
     if engine=='local':
@@ -186,7 +195,7 @@ async def _format_text_base(text,engine='cloud-mini',style='bericht',debug=False
     protected_hint='\nBehoud elke FLOWLAB_..._END-markering exact één keer en ongewijzigd op zijn plek.' if re.search(r'FLOWLAB_[0-9A-F]{12}_\d+_END',text) else ''
     payload={'model':model,'messages':[{'role':'system','content':PROMPT+'\n'+style_hint+protected_hint},{'role':'user','content':'<transcriptie>\n'+text+'\n</transcriptie>'}],'temperature':0,'max_tokens':min(3000,max(256,len(text)//2+200))}
     if engine=='local':payload['chat_template_kwargs']={'enable_thinking':False}
-    async with httpx.AsyncClient(timeout=45,trust_env=False) as c:
+    async with httpx.AsyncClient(timeout=60,trust_env=False) as c:
         r=await c.post(base+'/v1/chat/completions',headers={'Authorization':'Bearer '+key},json=payload)
         if r.status_code!=200:raise RuntimeError(f'Opmaakdienst gaf HTTP {r.status_code}.')
         d=r.json(); choice=d['choices'][0]
@@ -202,7 +211,7 @@ async def _format_text_base(text,engine='cloud-mini',style='bericht',debug=False
 async def format_text(text,engine='cloud-mini',style='bericht',debug=False,paragraphs='normaal'):
     if engine not in (*FORMAT_MODELS,'local','verbatim'):raise ValueError('Onbekende opmaakmotor.')
     if paragraphs not in ('compact','normaal','ruim'):raise ValueError('Onbekende alinea-indeling.')
-    if len(text)>12000:raise ValueError('Tekst is te lang voor deze proef.')
+    if len(text)>MAX_TEXT_CHARS:raise ValueError('Tekst is te lang voor deze proef.')
     start=time.perf_counter()
     if re.match(r'^type letterlijk\b',text,re.I):return await _format_text_base(text,engine,style,debug)
     masked,protected=protect_snippets(text)
@@ -271,7 +280,7 @@ async def run_clip(pcm,engine,formatter,style='bericht',realtime=True,paragraphs
     if engine=='hybrid-parakeet':engine='parakeet'
     if formatter!='local' and formatter!='verbatim' and engine in ('parakeet','whisper'): mode='hybrid'
     else:mode='offline' if engine in ('parakeet','whisper') else 'cloud'
-    if len(pcm)>24000*2*MAX_SECONDS:raise ValueError('Maximaal 90 seconden.')
+    if len(pcm)>24000*2*MAX_SECONDS:raise ValueError(LIMIT_MESSAGE)
     if silent(pcm):return {'raw':'','text':'','asr_ms':0,'format_ms':0,'after_stop_ms':0,'warning':'Geen hoorbare spraak gevonden.','mode':mode}
     await prepare_local(engine,formatter)
     if engine in ASR_MODELS:

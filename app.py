@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from engines import ROOT, APP_PORT, ASR_MODELS, FORMAT_MODELS, MAX_SECONDS, CloudStream, workers, format_text, local_transcribe, run_clip, read_wav, silent,prepare_local
 import storage
 from personalization import snippet_preview
+from limits import MAX_WAV_BYTES,MAX_TEXT_CHARS,LIMIT_MESSAGE
 
 ORIGINS={f'http://127.0.0.1:{APP_PORT}',f'http://localhost:{APP_PORT}'}
 gate=asyncio.Lock()
@@ -43,10 +44,10 @@ async def index():return FileResponse(ROOT/'web/index.html')
 
 @app.get('/api/status')
 async def status():
-    return {'app':'flow-lab','cloud_configured':(ROOT/'.env.local').is_file(),'local_installed':all((ROOT/'models'/n).exists() for n in ['parakeet-tdt-0.6b-v3.q8_0.gguf','ggml-large-v3-turbo-q5_0.bin','Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf']),'busy':gate.locked(),'version':'0.2.0','history_days':storage.RETENTION_DAYS}
+    return {'app':'flow-lab','cloud_configured':(ROOT/'.env.local').is_file(),'local_installed':all((ROOT/'models'/n).exists() for n in ['parakeet-tdt-0.6b-v3.q8_0.gguf','ggml-large-v3-turbo-q5_0.bin','Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf']),'busy':gate.locked(),'version':'0.2.0','max_seconds':MAX_SECONDS,'history_days':storage.RETENTION_DAYS}
 
 class TextInput(BaseModel):
-    text:str=Field(max_length=12000)
+    text:str=Field(max_length=MAX_TEXT_CHARS)
     formatter:str='cloud-mini'
     style:str='bericht'
     paragraphs:str='normaal'
@@ -125,7 +126,7 @@ async def clip(request:Request):
     audio=bytearray()
     async for chunk in request.stream():
         audio.extend(chunk)
-        if len(audio)>20*1024*1024:raise HTTPException(413,'Maximaal 20 MB.')
+        if len(audio)>MAX_WAV_BYTES:raise HTTPException(413,'Maximaal 128 MB.')
     async with gate:
         try:
             pcm=read_wav(bytes(audio));result=await run_clip(pcm,engine,formatter,style,paragraphs=paragraphs)
@@ -150,17 +151,17 @@ async def record(ws:WebSocket):
             if engine in ASR_MODELS:
                 stream=CloudStream(engine,partial);await stream.start()
             await prepare_local(engine,formatter)
-            await ws.send_json({'type':'ready'})
+            await ws.send_json({'type':'ready','max_seconds':MAX_SECONDS})
             audio=bytearray(); began=time.perf_counter()
             while True:
                 msg=await asyncio.wait_for(ws.receive(),MAX_SECONDS+15)
                 if msg['type']=='websocket.disconnect':return
-                if time.perf_counter()-began>MAX_SECONDS+10:raise ValueError('De proef ondersteunt maximaal 90 seconden.')
+                if time.perf_counter()-began>MAX_SECONDS+10:raise ValueError(LIMIT_MESSAGE)
                 if msg.get('bytes') is not None:
                     chunk=msg['bytes']
                     if len(chunk)%2 or len(chunk)>48000:raise ValueError('Ongeldig audioblok.')
                     audio.extend(chunk)
-                    if len(audio)>MAX_SECONDS*48000:raise ValueError('Maximaal 90 seconden.')
+                    if len(audio)>MAX_SECONDS*48000:raise ValueError(LIMIT_MESSAGE)
                     if stream:await stream.append(chunk)
                 elif msg.get('text'):
                     event=json.loads(msg['text'])
@@ -173,7 +174,9 @@ async def record(ws:WebSocket):
                 raw=await stream.finish() if stream else await local_transcribe(bytes(audio),engine)
                 asr_ms=(time.perf_counter()-stopped)*1000
                 await ws.send_json({'type':'recognized','text':raw})
-                formatted=await format_text(raw,formatter,style,paragraphs=paragraphs)
+                try:formatted=await format_text(raw,formatter,style,paragraphs=paragraphs)
+                except Exception:
+                    formatted={'text':raw,'ms':0,'warning':'Opmaak mislukt. De herkende tekst is behouden; controleer en kopieer deze zelf.'}
                 return {'type':'done','raw':raw,'text':formatted['text'],'asr_ms':round(asr_ms,1),'format_ms':formatted['ms'],'after_stop_ms':round((time.perf_counter()-stopped)*1000,1),'warning':formatted['warning'],'snippets':formatted.get('snippets',[])}
             async def cancelled():
                 while True:

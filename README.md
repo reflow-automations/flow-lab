@@ -142,7 +142,7 @@ verwijder dan de twee Flow Lab-snelkoppelingen; je persoonlijke data blijft staa
 Twee korte drukken zetten de opname vast; een slotje toont dat. Een volgende druk
 of de rechterknop stopt en verwerkt. Esc of het kruisje annuleert. Een korte eerste
 tik van maximaal 250 ms krijgt na loslaten 320 ms om een tweede druk te herkennen.
-Een langere hold stopt direct bij loslaten. Maximaal 90 seconden per opname.
+Een langere hold stopt direct bij loslaten. Maximaal 5 minuten per opname.
 
 **Sneltoets wijzigen:** open het tabblad **Instellingen** in de app, kies je
 combinatie en klik **Sneltoets opslaan**. Ga daarna naar **Dicteren** of verberg
@@ -271,3 +271,11 @@ Deze export gebruikt een expliciete bestandslijst. Sleutels, database, persoonli
 instellingen, sessieafbeeldingen, audio, modellen, native binaries, logs en lokale
 onderzoeksnotities gaan niet mee. Deel niet zomaar een ZIP van de hele werkmap.
 Het exportscript publiceert of uploadt niets.
+
+## Vijf minuten en lokale standaard
+
+De desktop en nieuwe browservoorkeuren starten volledig lokaal. Een bestaande browserkeuze blijft bewaard. De opnamelimiet is 300 seconden, begrensd op echte audiosamples zodat ook het laatste blok wordt behouden. Vijf minuten PCM-audio vraagt circa 14,4 MB buffer. De herkenning gebeurt momenteel aan het einde, dus langere dictaten kunnen meer wachttijd geven.
+
+Lange tekst wordt op zinsgrenzen in kleinere opmaakverzoeken verdeeld. Daardoor passen ook langere dictaten binnen de lokale modelcontext. Bij mislukte opmaak of te sterke verkorting blijft de herkende tekst beschikbaar met een waarschuwing. Dit is een extra controle, geen garantie op perfecte herkenning of betekenisbehoud. WAV-upload ondersteunt maximaal 128 MB en vijf minuten; tekstinvoer maximaal 24.000 tekens.
+
+Het onderzoek naar een cloudvervanger, inclusief een kleine echte vergelijking van GPT-6 Luna en GPT-4.1 mini, staat in [MODEL-RESEARCH.md](MODEL-RESEARCH.md). Lokaal blijft standaard; er is geen nieuwe provider automatisch geactiveerd.

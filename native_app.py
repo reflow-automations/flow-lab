@@ -151,7 +151,7 @@ class NativeApp:
     def build_home(self):
         tab=self.tabs['home']
         self.shortcut_text=tk.StringVar();ttk.Label(tab,textvariable=self.shortcut_text,font=('Segoe UI',16,'bold')).pack(anchor='w',pady=(4,14))
-        ttk.Label(tab,text='Houd ingedrukt om te spreken. Laat los om te verwerken en te plaatsen.\nTwee keer snel indrukken zet de opname vast; nogmaals drukken stopt.\nKlik eerst in het tekstvak waar je de tekst wilt hebben.',font=('Segoe UI',11),justify='left').pack(anchor='w')
+        ttk.Label(tab,text='Houd ingedrukt om te spreken. Laat los om te verwerken en te plaatsen.\nTwee keer snel indrukken zet de opname vast; nogmaals drukken stopt.\nKlik eerst in het tekstvak waar je de tekst wilt hebben. Maximaal 5 minuten.',font=('Segoe UI',11),justify='left').pack(anchor='w')
         self.replay_text=tk.StringVar();ttk.Label(tab,textvariable=self.replay_text).pack(anchor='w',pady=(12,18))
         row=ttk.Frame(tab);row.pack(fill='x')
         ttk.Label(row,text='Verwerking:').pack(side='left',padx=(0,10))

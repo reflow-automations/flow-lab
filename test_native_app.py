@@ -13,8 +13,8 @@ def test_native_payload_preserves_snippet_exactly():
     payload=entry_payload('snippet',None,'Test',text,'  testzin\nvariant\n',True)
     assert payload['value']==text and payload['aliases']==['testzin','variant']
 
-def test_native_window_library_history_roundtrip(monkeypatch):
-    root=tk.Tk();root.withdraw()
+def test_native_window_library_history_roundtrip(monkeypatch,tk_window):
+    root=tk_window
     client=TestClient(api)
     fake=NS(root=root,root_path=Path(__file__).resolve().parent,service_url=f'http://127.0.0.1:{APP_PORT}',events=queue.Queue(),config={'hotkey':'ctrl-shift-space','formatter':'local'},replay_key='alt-shift-z',write_state=lambda:None,shortcut_settings=lambda:None,quit_all=lambda:None)
     def request(self,path,callback,method='GET',data=None):

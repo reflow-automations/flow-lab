@@ -21,6 +21,7 @@ from last_transcript import latest_text
 from shortcut_config import shortcut,shortcut_label,KEYS,MODIFIERS,LABELS
 from dictation_gesture import DictationGesture
 from compact_overlay import CompactOverlay
+from limits import MAX_SECONDS,SESSION_TIMEOUT_SECONDS,AudioBudget
 
 ROOT = Path(__file__).resolve().parent
 STATE = ROOT / 'data/desktop-status.json'
@@ -63,6 +64,7 @@ class Recording:
         self.fixture = fixture
         self.config = dict(app.config)
         self.audio = queue.Queue()
+        self.audio_budget=AudioBudget();self.limit_notified=False
         self.stop = threading.Event()
         self.cancel = threading.Event()
         self.started = time.monotonic()
@@ -74,10 +76,14 @@ class Recording:
 
     def push(self, data):
         if self.cancel.is_set(): return
+        data=self.audio_budget.take(data)
+        if not data:return
         level = amplitude(data)
         if level > .025: self.last_sound = time.monotonic()
         self.emit('level', level)
         self.audio.put(data)
+        if self.audio_budget.full and not self.limit_notified:
+            self.limit_notified=True;self.stop.set();self.emit('source_done')
 
     def source(self):
         try:
@@ -94,9 +100,10 @@ class Recording:
             else:
                 self.mic = w.Microphone(self.push)
                 self.mic.start()
+                capture_started=time.monotonic()
                 self.emit('listening')
                 while not self.stop.wait(.04) and not self.cancel.is_set():
-                    if time.monotonic() - self.started >= 90:
+                    if time.monotonic() - capture_started >= MAX_SECONDS+2:
                         self.emit('source_done')
                         break
                 self.mic.stop()
@@ -128,7 +135,7 @@ class Recording:
                 await socket.send(json.dumps({'type': 'cancel'}))
             sender = asyncio.create_task(send())
             try:
-                deadline = time.monotonic() + 180
+                deadline = time.monotonic() + SESSION_TIMEOUT_SECONDS
                 while time.monotonic() < deadline:
                     if self.cancel.is_set(): return
                     try: message = json.loads(await asyncio.wait_for(socket.recv(), .2))

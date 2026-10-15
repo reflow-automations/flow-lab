@@ -73,10 +73,10 @@ def test_release_before_target_capture_cannot_leave_microphone_running(monkeypat
     d.Desktop.begin_recording(app,NS(password=False))
     assert mic.stop.is_set() and app.state=='processing'
 
-def test_compact_overlay_size_and_controls():
+def test_compact_overlay_size_and_controls(tk_window):
     import tkinter as tk
     from compact_overlay import CompactOverlay
-    root=tk.Tk();root.withdraw();calls=[]
+    root=tk_window;calls=[]
     try:
         overlay=CompactOverlay(root,lambda:calls.append('cancel'),lambda:calls.append('stop'),lambda:calls.append('copy'))
         overlay.configure(text='Ik luister. Laat los om te verwerken.')

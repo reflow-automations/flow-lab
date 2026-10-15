@@ -39,7 +39,7 @@ def test_audio_duration_and_resampling():
     assert silent(bytes(48000))
 
 def test_long_audio_rejected():
-    with pytest.raises(ValueError):read_wav(pcm_wav(bytes(48000*91)))
+    with pytest.raises(ValueError):read_wav(pcm_wav(bytes(48000*301)))
 
 def test_silence_does_not_call_cloud():
     result=asyncio.run(run_clip(bytes(48000),'cloud-live','cloud-mini'))
