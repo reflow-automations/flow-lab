@@ -4,7 +4,7 @@
   "caveat": "Snelheden hieronder zijn medianen na einde audio, inclusief opmaak, met al geladen/opgewarmde modellen. Gemeten op één GPU-pc met drie korte synthetische clips, 3 tot 6 runs per route (15 oktober 2026). Het zijn geen garanties voor jouw pc, stem of langere teksten. De eerste lokale start kan veel langer duren; één koude Whisper-run duurde ongeveer 46 seconden.",
   "desktop": {
     "local": "Snel en volledig op deze pc: Parakeet + Qwen. Geen API-kosten. De lokale opmaak is experimenteel en kan woorden onbedoeld wijzigen.",
-    "cloud-mini": "Bestaande cloudopmaak: Parakeet + GPT-4.1 mini. Alleen tekst naar OpenAI, met API-kosten. Deze formatter wordt op 14 januari 2027 uitgefaseerd; lokaal blijft standaard."
+    "cloud-mini": "Bestaande cloudopmaak: Parakeet + GPT-4.1 mini. Alleen herkende tekst naar OpenAI, met API-kosten. Deze formatter wordt op 14 januari 2027 uitgefaseerd; lokaal blijft standaard."
   },
   "engines": {
     "hybrid-parakeet": {
