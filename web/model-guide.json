@@ -1,0 +1,35 @@
+{
+  "intro": "Er zijn twee stappen: spraakherkenning maakt woorden van je stem; tekstopmaak maakt daar interpunctie, alinea's en een leesbaar bericht van. Een betere formatter herstelt niet gegarandeerd verkeerd herkende woorden.",
+  "recommendation": "Begin met lokale Parakeet-herkenning en GPT-4.1 mini-opmaak als nette tekst het belangrijkst is. Kies volledig lokaal als privacy, geen API-kosten en snel reageren zwaarder wegen. Dit advies komt uit een kleine Flow Lab-proef, niet uit een algemene modelranglijst.",
+  "caveat": "Snelheden hieronder zijn medianen na einde audio, inclusief opmaak, met al geladen/opgewarmde modellen. Gemeten op één GPU-pc met drie korte synthetische clips, 3 tot 6 runs per route (15 oktober 2026). Het zijn geen garanties voor jouw pc, stem of langere teksten. De eerste lokale start kan veel langer duren; één koude Whisper-run duurde ongeveer 46 seconden.",
+  "desktop": {
+    "local": "Snel en volledig op deze pc: Parakeet + Qwen. Geen API-kosten. De lokale opmaak is experimenteel en kan woorden onbedoeld wijzigen.",
+    "cloud-mini": "Voorkeur voor nette tekst in de kleine proef: Parakeet + GPT-4.1 mini. Iets meer wachttijd en API-kosten; alleen herkende tekst gaat naar OpenAI."
+  },
+  "engines": {
+    "hybrid-parakeet": {"title":"Lokale audio met keuze voor cloudopmaak", "text":"Parakeet herkent op je GPU. In combinatie met GPT-4.1 mini-opmaak de beste balans in onze kleine proef. Alleen met een cloudformatter wordt de herkende tekst verstuurd; audio blijft lokaal."},
+    "parakeet": {"title":"Parakeet: snelle lokale eerste keuze", "text":"Spraakherkenning op je eigen GPU, zonder audio-upload of API-kosten. Namen en vaktermen kunnen fout gaan; voeg correcties toe aan je woordenboek. Niet algemeen bewezen nauwkeuriger dan Whisper."},
+    "whisper": {"title":"Whisper Turbo: lokaal alternatief", "text":"Probeer dezelfde opname hiermee als Parakeet woorden mist. In de kleine warme proef iets langzamer; geen bewezen algemene kwaliteitswinnaar. De eerste opstart kan merkbaar langer duren."},
+    "cloud-live": {"title":"GPT Live Transcribe: tussentijdse tekst", "text":"Ontworpen om tijdens het spreken tekst door te geven. Dat betekent niet dat de volledig opgemaakte eindtekst eerder klaar is: in onze proef was de totale route langzamer dan lokaal. Audio gaat naar OpenAI; API-kosten."},
+    "cloud-full": {"title":"GPT-4o Transcribe: cloudvergelijking", "text":"Alternatief als lokale herkenning niet goed genoeg is. In onze proef geen snelheidswinst; een kwaliteitsvoordeel op jouw stem is nog niet aangetoond. Audio gaat naar OpenAI; duurder per audiotoken dan Mini volgens de gecontroleerde modelpagina's."},
+    "cloud-mini": {"title":"GPT-4o Mini Transcribe: goedkoper binnen de cloud", "text":"Lagere audiotokenprijs dan GPT-4o Transcribe. Niet automatisch sneller: in onze kleine proef ongeveer dezelfde mediaan en meer spreiding. Audio gaat naar OpenAI; beoordeel zelf de herkenning."}
+  },
+  "formatters": {
+    "cloud-mini": {"title":"GPT-4.1 mini: voorkeur voor opmaak", "text":"Maakte in de kleine Flow Lab-proef betrouwbaardere berichten, interpunctie en witregels dan de lokale formatter. Herkende tekst gaat naar OpenAI; internet, een eigen sleutel en API-kosten zijn nodig. Ook dit model kan fouten maken."},
+    "local": {"title":"Qwen 4B: snelle lokale opmaak (proef)", "text":"Werkt op deze pc, zonder API-kosten of tekst-upload. Was warm het snelst, maar wijzigde soms inhoud of formuleringen. Controleer vooral namen, getallen en ontkenningen."},
+    "verbatim": {"title":"Geen nabewerking: herkenning behouden", "text":"Slaat de AI-opmaakstap over. Bespaart die verwerkingstijd, maar geeft minder redactie. Woordenboek, snippets en de gekozen alinea-indeling kunnen nog wel worden toegepast; dit is dus niet per definitie het ruwe transcript."}
+  },
+  "measurements": [
+    {"route":"Parakeet + lokale Qwen","median":"0,55 s","range":"0,45 tot 0,60 s","runs":3},
+    {"route":"Whisper Turbo + lokale Qwen","median":"0,70 s","range":"0,60 tot 0,82 s","runs":3},
+    {"route":"Parakeet + GPT-4.1 mini","median":"1,02 s","range":"0,89 tot 1,47 s","runs":6},
+    {"route":"GPT Live Transcribe + GPT-4.1 mini","median":"3,74 s","range":"3,69 tot 4,01 s","runs":3},
+    {"route":"GPT-4o Transcribe + GPT-4.1 mini","median":"4,39 s","range":"4,26 tot 4,69 s","runs":3},
+    {"route":"GPT-4o Mini Transcribe + GPT-4.1 mini","median":"4,35 s","range":"3,96 tot 9,06 s","runs":3}
+  ],
+  "sources": [
+    {"title":"OpenAI: GPT Live Transcribe","url":"https://developers.openai.com/api/docs/models/gpt-live-transcribe"},
+    {"title":"OpenAI: GPT-4o Transcribe","url":"https://developers.openai.com/api/docs/models/gpt-4o-transcribe"},
+    {"title":"OpenAI: GPT-4o Mini Transcribe","url":"https://developers.openai.com/api/docs/models/gpt-4o-mini-transcribe"}
+  ]
+}

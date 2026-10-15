@@ -6,6 +6,7 @@ from tkinter import ttk,messagebox
 from urllib.parse import urlencode,quote
 import httpx
 from shortcut_config import shortcut,shortcut_label,KEYS,MODIFIERS,LABELS
+from model_guide import load_guide,guide_text
 
 def entry_payload(kind,identifier,name,value,aliases,enabled):
     return dict(id=identifier or None,name=name if kind=='snippet' else value,
@@ -17,6 +18,7 @@ def set_text(widget,value):
 class NativeApp:
     def __init__(self,app):
         self.app=app;self.root=tk.Toplevel(app.root);self.root.title('Flow Lab')
+        self.model_guide=load_guide();self.guide_window=None
         self.root.geometry('1060x740');self.root.minsize(820,600)
         self.root.iconbitmap(str(app.root_path/'assets/flow-lab.ico'))
         self.root.update_idletasks()
@@ -128,6 +130,13 @@ class NativeApp:
             data={key:self.preference_choices[key][var.get()] for key,var in self.preference_vars.items()}
             self.app.events.put(('preferences',data))
         ttk.Button(options,text='Verwerking opslaan',command=save_preferences).grid(row=3,column=1,sticky='w',pady=(9,0))
+        self.settings_model_hint=tk.StringVar()
+        ttk.Label(options,textvariable=self.settings_model_hint,wraplength=300,justify='left').grid(row=0,column=2,rowspan=3,sticky='nw',padx=(24,0))
+        ttk.Button(options,text='Welke modellen kies ik?',command=self.show_model_guide).grid(row=3,column=2,sticky='w',padx=(24,0),pady=(9,0))
+        def explain_settings(*_):
+            selected=self.preference_choices['formatter'].get(self.preference_vars['formatter'].get(),'local')
+            self.settings_model_hint.set(self.model_guide['desktop'][selected])
+        self.preference_vars['formatter'].trace_add('write',explain_settings);explain_settings()
         ttk.Label(tab,text='Volledig lokaal stuurt geen audio of tekst naar OpenAI. Bij cloudopmaak gaat alleen de herkende tekst naar OpenAI.\nInstellingen en geschiedenis blijven op deze pc; audio wordt niet bewaard.',wraplength=850).pack(anchor='w')
 
     def refresh_settings(self):
@@ -149,11 +158,26 @@ class NativeApp:
         self.mode=tk.StringVar(value='Volledig lokaal' if self.app.config['formatter']=='local' else 'Lokale audio, cloudopmaak')
         choice=ttk.Combobox(row,textvariable=self.mode,values=['Volledig lokaal','Lokale audio, cloudopmaak'],state='readonly',width=29)
         choice.pack(side='left');choice.bind('<<ComboboxSelected>>',lambda _:self.app.events.put(('mode','local' if self.mode.get()=='Volledig lokaal' else 'cloud-mini')))
-        ttk.Label(tab,text='Bij cloudopmaak gaat herkende tekst naar OpenAI. Audio blijft bij deze desktopopties lokaal.',wraplength=820).pack(anchor='w',pady=(8,20))
+        ttk.Button(row,text='Welke modellen kies ik?',command=self.show_model_guide).pack(side='left',padx=12)
+        self.home_model_hint=tk.StringVar()
+        def explain_home(*_):self.home_model_hint.set(self.model_guide['desktop']['local' if self.mode.get()=='Volledig lokaal' else 'cloud-mini'])
+        self.mode.trace_add('write',explain_home);explain_home()
+        ttk.Label(tab,textvariable=self.home_model_hint,wraplength=820).pack(anchor='w',pady=(8,20))
         ttk.Label(tab,text='Laatste resultaat',font=('Segoe UI',12,'bold')).pack(anchor='w')
         self.latest=tk.Text(tab,height=8,wrap='word',font=('Segoe UI',11),padx=12,pady=12)
         self.latest.pack(fill='both',expand=True,pady=8)
         ttk.Button(tab,text='Laatste resultaat kopiëren',command=lambda:self.copy(self.latest.get('1.0','end-1c'))).pack(anchor='e')
+
+    def show_model_guide(self):
+        if self.guide_window and self.guide_window.winfo_exists():self.guide_window.lift();return
+        dialog=tk.Toplevel(self.root);self.guide_window=dialog
+        dialog.title('Flow Lab - Welke modellen kies ik?');dialog.geometry('790x650');dialog.minsize(620,450);dialog.transient(self.root)
+        frame=ttk.Frame(dialog,padding=18);frame.pack(fill='both',expand=True)
+        text=tk.Text(frame,wrap='word',font=('Segoe UI',11),padx=14,pady=14,background='#f8faf8',relief='flat')
+        scroll=ttk.Scrollbar(frame,command=text.yview);text.configure(yscrollcommand=scroll.set)
+        scroll.pack(side='right',fill='y');text.pack(fill='both',expand=True)
+        text.insert('1.0',guide_text(self.model_guide));text.configure(state='disabled')
+        ttk.Button(dialog,text='Sluiten',command=dialog.destroy).pack(pady=(0,12))
 
     def refresh_home(self):
         self.shortcut_text.set(shortcut_label(self.app.config['hotkey'])+'  |  Dicteren')

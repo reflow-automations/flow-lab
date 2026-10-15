@@ -40,6 +40,27 @@ Nee. Flow Lab start zelf lokale modelservers als subprocessen:
 opmaak is het model Qwen. Ollama hoeft niet geïnstalleerd te worden.
 Revisies en hashes staan in [model-lock.json](model-lock.json).
 
+### Hulp bij kiezen
+
+Bij de verwerkingskeuze staat een korte uitleg. Klik in de app op **Welke modellen
+kies ik?** voor snelheid, kwaliteit, privacy en API-kosten. De optionele browser-
+interface toont ook uitleg bij elke herkenner en formatter. De informatie komt
+voor beide interfaces uit `web/model-guide.json`.
+
+Begin met Parakeet + GPT-4.1 mini-opmaak als nette tekst het belangrijkst is.
+Kies Parakeet + lokale Qwen als alles op de pc moet blijven en je geen API-kosten
+wilt. De lokale formatter is experimenteel en kan inhoud wijzigen. Whisper is
+een lokaal alternatief om met dezelfde opname te vergelijken, geen bewezen
+algemene kwaliteitswinnaar.
+
+Een kleine synthetische proef op één GPU-pc gaf na einde audio, inclusief opmaak,
+warme medianen van 0,55 s (Parakeet + Qwen, 3 runs), 0,70 s (Whisper + Qwen,
+3 runs) en 1,02 s (Parakeet + GPT-4.1 mini, 6 runs). De volledige cloudroutes
+met GPT-4.1 mini-opmaak zaten rond 3,74 tot 4,39 s mediaan (3 runs per route).
+Dit is geen voorspelling voor een andere pc, langere teksten of jouw stem;
+opstarten en model laden vallen buiten die tijden. De eerste start kan veel
+langer duren. Live tussentijdse tekst is niet hetzelfde als de snelste eindtekst.
+
 ## Benodigdheden
 
 - Windows 10/11 x64. Getest op één Windows-pc, niet op een brede hardwarematrix.

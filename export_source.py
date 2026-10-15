@@ -11,10 +11,10 @@ FILES='''README.md LICENSE THIRD_PARTY.md PUBLICATION.md .gitignore .env.example
 .githooks/pre-commit .githooks/pre-push .github/workflows/checks.yml publication_guard.py test_publication.py
 Setup-FlowLab.ps1 Install-FlowLab.ps1 Start-FlowLab.ps1 Start-FlowLab.cmd Start-FlowLab-Desktop.cmd Stop-FlowLab.ps1 assets/flow-lab.ico
 app.py engines.py storage.py personalization.py dictionary.json
-desktop_helper.py desktop_windows.py native_app.py shortcut_config.py dictation_gesture.py compact_overlay.py last_transcript.py
+desktop_helper.py desktop_windows.py native_app.py model_guide.py shortcut_config.py dictation_gesture.py compact_overlay.py last_transcript.py
 check_wispr_library.py setup_models.py model-lock.json requirements.lock.txt export_source.py
-web/index.html web/app.js web/style.css web/recorder.js
-pytest.ini conftest.py test_flow.py test_personalization.py test_desktop.py test_replay_import.py test_shortcuts.py test_gesture.py test_native_app.py test_recorder.cjs'''.split()
+web/index.html web/app.js web/style.css web/recorder.js web/model-guide.json
+pytest.ini conftest.py test_flow.py test_personalization.py test_desktop.py test_replay_import.py test_shortcuts.py test_gesture.py test_native_app.py test_model_guide.py test_recorder.cjs'''.split()
 
 def build(destination=None):
     destination=Path(destination) if destination else ROOT/'releases/flow-lab-0.2.0-source.zip'

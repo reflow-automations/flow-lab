@@ -48,4 +48,10 @@ def test_native_window_library_history_roundtrip(monkeypatch):
         window.preference_vars['paragraphs'].set('Meer witregels')
         buttons['Verwerking opslaan'].invoke()
         event=fake.events.get();assert event[0]=='preferences' and event[1]['paragraphs']=='ruim'
+        window.preference_vars['formatter'].set('Lokale audio, cloudopmaak')
+        assert 'API-kosten' in window.settings_model_hint.get()
+        assert 'herkende tekst' in window.settings_model_hint.get()
+        assert fake.events.empty() # Merely reading the hint does not save/change a model.
+        window.show_model_guide();window.guide_window.withdraw()
+        assert window.guide_window.title()=='Flow Lab - Welke modellen kies ik?'
     finally:root.destroy()
