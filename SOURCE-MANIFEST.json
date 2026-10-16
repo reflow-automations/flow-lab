@@ -1,5 +1,5 @@
 {
-  "README.md": "0314da77da443296e5b58d56c19ebeb5f249ccd7deac13713a39386984447732",
+  "README.md": "d1e4aaa14a18e067ba25a371afcb529a7efec273acc9be7e9a7fa63f1f50facd",
   "LICENSE": "b824b676058a5c84fb920603297d6e8b08cb7acf29024e08d17f730f8a3bca43",
   "THIRD_PARTY.md": "317937b6f2781e2ed87d469cb8b8747b046097198d968b241a0e456a52214cfd",
   "PUBLICATION.md": "f9c4396e835fc623a344e7ce298afe01652fc4efa0c4835dd11ea9dc10ec040f",
@@ -27,7 +27,7 @@
   "openrouter_provider.py": "c334e957b7a83f829fc055ae7bacfb9a247737f18b3687c65dfaf2ca0206cdf2",
   "recovery.py": "21033a572b25ab2446ca39b26c849a48546f0f6376a7f614bff389fcf1dae660",
   "launcher.py": "1715b42378b5934aa7bb6bb17d7e193bb1588e69917172165df0cb47d1cdab6a",
-  "desktop_helper.py": "b38439a6ee8ef570591ebac052a18e7be3a44661776b22a22f90c8c994279754",
+  "desktop_helper.py": "5250eb07dc4c92ac6419e49a60e48f2bb77f6653041309d324924756df7bc63a",
   "desktop_windows.py": "6c85045584ded8244997afbc025acabb8bd96c7eb47e81271aef9abccc71dcbf",
   "native_app.py": "afc1697d1beb951f76ea8648a7d8dadee91d25237a1f7f3d9639fffe70cc9101",
   "model_guide.py": "842537a22ccbdbd56bc036d2b12b8767635a0363a3425b117d67f6b45fa8eda7",

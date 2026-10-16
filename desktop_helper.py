@@ -530,6 +530,7 @@ class Desktop:
                     session.timings['release_to_outcome_ms']=round((time.monotonic()-released)*1000,1)
                     if ok:session.timings['release_to_verified_ms']=session.timings['release_to_outcome_ms']
             if hasattr(self,'record_insertion'):self.record_insertion(session,ok,reason,paste_sent)
+            session.paste_sent=paste_sent
             self.events.put(('inserted', session.ident, ok or complete, reason))
 
     def record_insertion(self,session,ok,reason,paste_sent):
@@ -669,13 +670,14 @@ class Desktop:
                     self.last_text=args[0].get('text',''); self.state='inserting'; self.display('Tekst plaatsen...')
                     threading.Thread(target=self.insert,args=(self.current,args[0]),daemon=True).start()
                 elif kind == 'inserted':
+                    hide_delay=700 if args[0] or getattr(self.current,'paste_sent',False) else 15000
                     timings=getattr(self.current,'timings',{})
                     timing=timings.get('release_to_verified_ms',timings.get('release_to_complete_text_ms'))
                     message='Geplaatst in het gekozen tekstvak.' if args[0] else args[1]+' Je tekst blijft hieronder beschikbaar.'
                     if args[0] and timing is not None:message+=f' {timing/1000:.2f} s van loslaten tot bevestigd plaatsen.'
                     self.remember_status(message)
                     self.gesture.reset()
-                    self.current=None; self.state='idle'; self.hotkeys.command('escape',False); self.display(args[1]); self.hide_later(3500 if args[0] else 15000)
+                    self.current=None; self.state='idle'; self.hotkeys.command('escape',False); self.display(args[1]); self.hide_later(hide_delay)
                     if self.control_window and self.control_window.exists() and self.control_window.root.state()!='withdrawn':self.control_window.refresh_selected()
                     if self.test: self.tests['audio_to_insert']=args[0]; self.finish_test()
                 elif kind == 'error':

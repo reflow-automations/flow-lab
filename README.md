@@ -188,7 +188,10 @@ Een leeg chatveld met hinttekst (zoals "Antwoord...") geeft die hinttekst soms
 als inhoud door. Staat na het plakken precies de dictatie in het veld, dan meldt
 Flow Lab **Ingevoegd in leeg tekstvak**. Plakken kan geen tekst wissen die niet
 geselecteerd was.
-Foutmeldingen blijven 15 seconden in het balkje staan en zijn daarna terug te
+Na de plaatsingscontrole verdwijnen meldingen bij een verstuurd plakcommando
+na 0,7 seconde, ook als Windows de plaatsing niet volledig kon bevestigen.
+De volledige status blijft in de app beschikbaar. Fouten die het plaatsen
+verhinderen blijven 15 seconden in het balkje staan en zijn daarna terug te
 lezen in de app, ook na herstart. Alleen de nieuwste plaatsingsdiagnose en
 tijdsmetingen worden lokaal bewaard in `logs/desktop-last-insertion.json`;
 die diagnose bevat geen dictaattekst of klembordinhoud.
