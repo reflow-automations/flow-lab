@@ -22,6 +22,7 @@ from shortcut_config import shortcut,shortcut_label,KEYS,MODIFIERS,LABELS
 from dictation_gesture import DictationGesture
 from compact_overlay import CompactOverlay
 from limits import MAX_SECONDS,SESSION_TIMEOUT_SECONDS,AudioBudget
+from recovery import RecoveryStore,MAX_PENDING,wav_bytes
 
 ROOT = Path(__file__).resolve().parent
 STATE = ROOT / 'data/desktop-status.json'
@@ -64,6 +65,7 @@ class Recording:
         self.fixture = fixture
         self.config = dict(app.config)
         self.audio = queue.Queue()
+        self.pcm=bytearray();self.recording_id=str(uuid.uuid4());self.source_error=None
         self.audio_budget=AudioBudget();self.limit_notified=False
         self.stop = threading.Event()
         self.cancel = threading.Event()
@@ -80,6 +82,7 @@ class Recording:
         if self.cancel.is_set(): return
         data=self.audio_budget.take(data)
         if not data:return
+        if hasattr(self,'pcm'):self.pcm.extend(data)
         level = amplitude(data)
         if level > .025: self.last_sound = time.monotonic()
         self.emit('level', level)
@@ -111,16 +114,18 @@ class Recording:
                         break
                 self.mic.stop()
         except Exception as exc:
-            self.cancel.set()
-            self.emit('error', str(exc))
+            self.source_error='De microfoonopname stopte onverwacht.'
+            self.stop.set()
         finally:
             if self.mic: self.mic.close()
+            if self.pcm and not self.cancel.is_set():
+                self.app.recovery_store.save(self.recording_id,self.pcm,self.config,partial=bool(self.source_error))
             self.audio.put(None)
 
     async def network(self):
         from websockets.asyncio.client import connect
         async with connect(URL.replace('http', 'ws') + '/api/record', origin=URL, open_timeout=8, max_size=2**22) as socket:
-            await socket.send(json.dumps({**self.config, 'style': self.config.get('style','bericht')}))
+            await socket.send(json.dumps({**self.config, 'recording_id':self.recording_id,'style': self.config.get('style','bericht')}))
             ready = False
             async def send():
                 nonlocal ready
@@ -151,6 +156,7 @@ class Recording:
                         ready = True
                         self.timings['backend_ready_ms']=round((time.monotonic()-self.started)*1000,1)
                     elif kind == 'done':
+                        if self.source_error:raise RuntimeError(self.source_error)
                         self.timings['result_ready_ms']=round((time.monotonic()-self.started)*1000,1)
                         self.timings['backend_processing_ms']=message.get('after_stop_ms')
                         if self.released_at is not None:
@@ -168,16 +174,24 @@ class Recording:
         producer.start()
         try: asyncio.run(self.network())
         except Exception as exc:
-            if not self.cancel.is_set(): self.emit('error', str(exc))
+            if not self.cancel.is_set():
+                if not self.stop.is_set():self.emit('offline_capture')
+                # A network failure must not cut off the rest of the user's speech.
+                producer.join(MAX_SECONDS+3)
+                if producer.is_alive():self.stop.set();producer.join(3)
+                message=str(exc) if isinstance(exc,RuntimeError) else 'De verbinding stopte voordat het resultaat binnenkwam.'
+                if not self.cancel.is_set():self.emit('error',message)
         finally:
             self.stop.set()
             producer.join(3)
+            if self.cancel.is_set():self.app.recovery_store.discard(self.recording_id)
 
 class Desktop:
     def __init__(self, test=False):
         self.events = queue.Queue()
         self.root_path=ROOT;self.service_url=URL;self.control_window=None
         self.config = settings()
+        self.recovery_store=RecoveryStore(ROOT/'data/recovery')
         self.test = test
         self.current = None
         self.last_insertion_message='Dit is een kopie van je laatste tekst. De plaatsingsstatus verschijnt na het dicteren.'
@@ -321,6 +335,10 @@ class Desktop:
 
     def start(self):
         if self.current or self.state!='idle': return
+        if len(self.recovery_store.ids())>=MAX_PENDING:
+            self.gesture.reset()
+            self.remember_status('Er staan drie opnames klaar voor herstel. Verwerk of verwijder er eerst een in Dicteren.')
+            self.open_app('home');return
         self.stop_requested=False
         self.ident += 1
         ident = self.ident
@@ -393,6 +411,31 @@ class Desktop:
         self.hotkeys.command('escape', False)
         self.display('Geannuleerd')
         self.hide_later()
+
+    def retry_recording(self,recording_id):
+        if self.state!='idle':return
+        self.ident+=1;ident=self.ident
+        self.state='processing';self.hotkeys.command('escape',True)
+        self.current=SimpleNamespace(cancel=threading.Event(),stop=threading.Event())
+        self.remember_status('Opgeslagen opname opnieuw verwerken. De microfoon blijft uit.')
+        def run():
+            import httpx
+            try:
+                metadata,pcm=self.recovery_store.load(recording_id)
+                if metadata.get('partial'):self.events.put(('recovery_note',ident,'Dit is een gedeeltelijke opname na een microfoonfout.'))
+                response=httpx.post(URL+'/api/clip',params={**metadata['config'],'recording_id':recording_id},
+                                    content=wav_bytes(pcm),headers={'Origin':URL,'Content-Type':'audio/wav'},
+                                    timeout=SESSION_TIMEOUT_SECONDS,trust_env=False)
+                if response.status_code==409:raise RuntimeError('Er wordt nog verwerkt. De opname blijft bewaard; probeer later opnieuw.')
+                if not response.is_success:raise RuntimeError('Opnieuw verwerken is mislukt. De opname blijft bewaard.')
+                result=response.json()
+                if not isinstance(result.get('text'),str) or not isinstance(result.get('raw'),str) or (result['raw'].strip() and not result['text'].strip()) or (result['text'] and result.get('history_id')!=recording_id):
+                    raise RuntimeError('Geen bevestigd herstelresultaat ontvangen. De opname blijft bewaard.')
+                result['recovery_partial']=bool(metadata.get('partial'))
+                self.events.put(('recovered',ident,recording_id,result))
+            except Exception as exc:
+                self.events.put(('recovery_error',ident,str(exc) if isinstance(exc,RuntimeError) else 'Verbinding met Flow Lab mislukt. De opname blijft bewaard.'))
+        threading.Thread(target=run,daemon=True).start()
 
     def hide_later(self,delay_ms=3500):
         ident = self.ident
@@ -502,6 +545,12 @@ class Desktop:
                     window,callback,result,error=args
                     window.deliver(callback,result,error);continue
                 if kind == 'open': self.open_app(args[0] if args else 'home'); continue
+                if kind == 'retry_recording':self.retry_recording(args[0]);continue
+                if kind == 'discard_recording':
+                    if self.state=='idle':
+                        self.recovery_store.discard(args[0])
+                        if self.control_window and self.control_window.exists():self.control_window.refresh_home()
+                    continue
                 if kind == 'copy': self.copy(); continue
                 if kind == 'shortcut_settings': self.shortcut_settings(); continue
                 if kind == 'preferences':
@@ -553,6 +602,23 @@ class Desktop:
                     self.gesture_actions(self.gesture.feed(args[0],args[1]));continue
                 if not args or args[0] != self.ident: continue
                 args = args[1:]
+                if kind == 'recovery_note':self.remember_status(args[0]);continue
+                if kind == 'recovery_error':
+                    self.current=None;self.state='idle';self.hotkeys.command('escape',False)
+                    self.remember_status(args[0])
+                    if self.control_window and self.control_window.exists():self.control_window.refresh_home()
+                    continue
+                if kind == 'recovered':
+                    recording_id,result=args
+                    self.last_text=result.get('text','')
+                    self.recovery_store.discard(recording_id)
+                    self.current=None;self.state='idle';self.hotkeys.command('escape',False)
+                    message='Herstel klaar. Kies je tekstvak en druk Alt+Shift+Z, of kopieer hieronder.' if self.last_text else 'Geen hoorbare spraak gevonden in deze opname.'
+                    if result.get('recovery_partial'):message='Gedeeltelijke opname hersteld. Controleer of je laatste woorden erbij staan. '+message
+                    if result.get('warning'):message='Controleer de herkende tekst: '+result['warning']+' '+message
+                    self.remember_status(message)
+                    if self.control_window and self.control_window.exists():self.control_window.refresh_home()
+                    continue
                 if kind == 'replay_captured':
                     target,text=args
                     self.last_text=text
@@ -578,8 +644,11 @@ class Desktop:
                     else:self.stop()
                 elif kind == 'preparing':
                     if self.state=='processing':self.display('Lokale modellen laden. Je opname blijft bewaard.')
+                elif kind == 'offline_capture':
+                    if self.state=='recording':self.display('Verbinding weg. Ik blijf lokaal opnemen tot je stopt.')
                 elif kind == 'processing': self.state='processing'; self.display('Tekst opmaken...')
                 elif kind == 'result':
+                    if getattr(self.current,'recording_id',None):self.recovery_store.discard(self.current.recording_id)
                     self.last_text=args[0].get('text',''); self.state='inserting'; self.display('Tekst plaatsen...')
                     threading.Thread(target=self.insert,args=(self.current,args[0]),daemon=True).start()
                 elif kind == 'inserted':
@@ -593,10 +662,15 @@ class Desktop:
                     if self.control_window and self.control_window.exists() and self.control_window.root.state()!='withdrawn':self.control_window.refresh_selected()
                     if self.test: self.tests['audio_to_insert']=args[0]; self.finish_test()
                 elif kind == 'error':
-                    self.remember_status('Niet geplaatst: '+args[0])
+                    pending=self.recovery_store.entries()
+                    recovery_message=(' Opname bewaard. Open Dicteren > Opnieuw verwerken.' if pending else '')
+                    if any(not item.get('persistent',True) for item in pending):recovery_message+=' Sluit Flow Lab nog niet: de herstelkopie staat alleen in geheugen.'
+                    self.remember_status('Niet geplaatst: '+args[0]+recovery_message)
                     self.gesture.reset()
-                    if self.current: self.current.cancel.set(); self.current.stop.set()
-                    self.current=None; self.state='idle'; self.hotkeys.command('escape',False); self.display(args[0][:95]); self.hide_later(15000)
+                    if self.current:self.current.stop.set()
+                    self.current=None; self.state='idle'; self.hotkeys.command('escape',False)
+                    self.display('Opname bewaard. Opnieuw verwerken in Flow Lab > Dicteren.' if pending else args[0][:95]); self.hide_later(15000)
+                    if self.control_window and self.control_window.exists():self.control_window.refresh_home()
                     if self.test: self.tests['error']=args[0]; self.finish_test()
             self.gesture_actions(self.gesture.tick(time.monotonic()))
             self.overlay.render(self.state,self.levels,self.gesture.mode=='locked')

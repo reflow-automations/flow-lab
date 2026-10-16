@@ -166,6 +166,17 @@ class NativeApp:
         def explain_home(*_):self.home_model_hint.set(self.model_guide['desktop'][self.mode_choices[self.mode.get()]])
         self.mode.trace_add('write',explain_home);explain_home()
         ttk.Label(tab,textvariable=self.home_model_hint,wraplength=820).pack(anchor='w',pady=(8,20))
+        recovery=ttk.LabelFrame(tab,text='Opname herstellen',padding=8);recovery.pack(fill='x',pady=(0,12))
+        self.recovery_hint=tk.StringVar(value='Geen opname klaar voor herstel.')
+        ttk.Label(recovery,textvariable=self.recovery_hint,wraplength=820).pack(anchor='w')
+        actions=ttk.Frame(recovery);actions.pack(fill='x',pady=(6,0))
+        self.recovery_choice=tk.StringVar();self.recovery_choices={}
+        self.recovery_combo=ttk.Combobox(actions,textvariable=self.recovery_choice,state='readonly',width=47)
+        self.recovery_combo.pack(side='left',fill='x',expand=True)
+        self.retry_button=ttk.Button(actions,text='Opnieuw verwerken',command=self.retry_selected)
+        self.retry_button.pack(side='left',padx=8)
+        self.discard_button=ttk.Button(actions,text='Opname verwijderen',command=self.discard_selected)
+        self.discard_button.pack(side='left')
         ttk.Label(tab,text='Kopie van laatste resultaat',font=('Segoe UI',12,'bold')).pack(anchor='w')
         self.insertion_message=tk.StringVar(value=getattr(self.app,'last_insertion_message',''))
         ttk.Label(tab,textvariable=self.insertion_message,wraplength=850).pack(anchor='w',pady=(4,0))
@@ -185,6 +196,15 @@ class NativeApp:
         ttk.Button(dialog,text='Sluiten',command=dialog.destroy).pack(pady=(0,12))
 
     def refresh_home(self):
+        store=getattr(self.app,'recovery_store',None)
+        entries=store.entries() if store else []
+        self.recovery_choices={f"{datetime.fromtimestamp(item['created_at']).strftime('%d-%m %H:%M:%S')} | {item['duration_s']:.0f} s | {item.get('config',{}).get('formatter','onleesbaar')}"+(" | gedeeltelijk" if item.get('partial') else ''):item['id'] for item in entries}
+        self.recovery_combo.configure(values=list(self.recovery_choices))
+        if self.recovery_choice.get() not in self.recovery_choices:self.recovery_choice.set(next(iter(self.recovery_choices),''))
+        enabled=bool(entries) and getattr(self.app,'state','idle')=='idle'
+        self.retry_button.configure(state='normal' if enabled else 'disabled');self.discard_button.configure(state='normal' if enabled else 'disabled')
+        self.recovery_hint.set('Versleuteld op deze pc tot herstel of verwijderen. Opnieuw verwerken gebruikt de oorspronkelijke modelkeuze.' if entries else 'Geen opname klaar voor herstel. Mislukte opnames verschijnen hier, ook na herstart.')
+        if any(not item.get('persistent',True) for item in entries):self.recovery_hint.set('Let op: herstelkopie alleen in geheugen. Sluit Flow Lab niet voordat je deze hebt hersteld.')
         self.insertion_message.set(getattr(self.app,'last_insertion_message',''))
         self.shortcut_text.set(shortcut_label(self.app.config['hotkey'])+'  |  Dicteren')
         import desktop_windows as w
@@ -199,6 +219,17 @@ class NativeApp:
                 set_text(self.latest,data['items'][0]['text'] if data['items'] else '')
                 self.latest.configure(state='disabled')
         self.request('/api/history?limit=1',latest)
+
+    def retry_selected(self):
+        key=self.recovery_choices.get(self.recovery_choice.get())
+        if key:
+            self.retry_button.configure(state='disabled');self.discard_button.configure(state='disabled')
+            self.app.events.put(('retry_recording',key))
+
+    def discard_selected(self):
+        key=self.recovery_choices.get(self.recovery_choice.get())
+        if key and messagebox.askyesno('Herstelopname verwijderen','Deze opname definitief verwijderen?',parent=self.root):
+            self.app.events.put(('discard_recording',key))
 
     def copy(self,text):
         if not text:return

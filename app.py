@@ -53,10 +53,10 @@ class TextInput(BaseModel):
     style:str='bericht'
     paragraphs:str='normaal'
 
-def remember(result,raw,source,engine,formatter,style,paragraphs,duration=None):
+def remember(result,raw,source,engine,formatter,style,paragraphs,duration=None,recording_id=None):
     metadata={k:result.get(k) for k in ('asr_ms','format_ms','after_stop_ms','warning','snippets')}
     metadata.update({'source':source,'engine':engine,'formatter':formatter,'style':style,'paragraphs':paragraphs,'duration_s':duration})
-    result['history_id']=storage.add_history(raw,result['text'],metadata)
+    result['history_id']=storage.add_history(raw,result['text'],metadata,identifier=recording_id)
     return result
 
 @app.get('/api/library')
@@ -186,7 +186,7 @@ async def prewarm(request:Request):
     return {'started':True}
 
 @app.post('/api/clip')
-async def clip(request:Request):
+async def clip(request:Request,recording_id:uuid.UUID|None=None):
     engine=request.query_params.get('engine','parakeet');formatter=request.query_params.get('formatter','local');style=request.query_params.get('style','bericht');paragraphs=request.query_params.get('paragraphs','normaal')
     try:validate(engine,formatter)
     except ValueError as e:raise HTTPException(400,str(e))
@@ -197,9 +197,12 @@ async def clip(request:Request):
         if len(audio)>MAX_WAV_BYTES:raise HTTPException(413,'Maximaal 128 MB.')
     async with gate:
         try:
+            if recording_id:
+                existing=storage.history_result(str(recording_id))
+                if existing:return existing
             pcm=read_wav(bytes(audio));result=await run_clip(pcm,engine,formatter,style,paragraphs=paragraphs)
-            if await request.is_disconnected():return result
-            return remember(result,result['raw'],'bestand',engine,formatter,style,paragraphs,len(pcm)/48000)
+            if not recording_id and await request.is_disconnected():return result
+            return remember(result,result['raw'],'herstel' if recording_id else 'bestand',engine,formatter,style,paragraphs,len(pcm)/48000, str(recording_id) if recording_id else None)
         except Exception as e:raise HTTPException(400,str(e) if isinstance(e,(ValueError,RuntimeError)) else 'Het WAV-bestand kon niet worden verwerkt.')
 
 @app.websocket('/api/record')
@@ -212,6 +215,7 @@ async def record(ws:WebSocket):
     async with gate:
         try:
             cfg=await asyncio.wait_for(ws.receive_json(),10)
+            recording_id=str(uuid.UUID(cfg['recording_id'])) if cfg.get('recording_id') else None
             engine=cfg.get('engine','cloud-live');original_engine=engine;formatter=cfg.get('formatter','cloud-mini');style=cfg.get('style','bericht');paragraphs=cfg.get('paragraphs','normaal')
             validate(engine,formatter)
             if engine=='hybrid-parakeet':engine='parakeet'
@@ -258,7 +262,7 @@ async def record(ws:WebSocket):
                 finished,_=await asyncio.wait([processing,cancellation],return_when=asyncio.FIRST_COMPLETED)
                 if cancellation in finished:return
                 result=await processing
-                remember(result,result['raw'],'microfoon',original_engine,formatter,style,paragraphs,len(audio)/48000)
+                remember(result,result['raw'],'microfoon',original_engine,formatter,style,paragraphs,len(audio)/48000,recording_id)
                 await ws.send_json(result)
             finally:
                 for task in (processing,cancellation):

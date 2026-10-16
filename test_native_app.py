@@ -23,6 +23,13 @@ def test_native_window_library_history_roundtrip(monkeypatch,tk_window):
     monkeypatch.setattr(NativeApp,'request',request)
     try:
         window=NativeApp(fake);window.root.withdraw()
+        fake.recovery_store=NS(entries=lambda:[{'id':'synthetic-id','created_at':1,'duration_s':120,'config':{'formatter':'local'},'persistent':True}])
+        window.refresh_home()
+        assert str(window.retry_button['state'])=='normal'
+        window.retry_button.invoke()
+        assert fake.events.get_nowait()==('retry_recording','synthetic-id')
+        fake.recovery_store=NS(entries=lambda:[]);window.refresh_home()
+        assert str(window.retry_button['state'])=='disabled'
         editor=window.editors['snippet']
         editor.name.set('Native test');editor.value.insert('1.0','Exact.\n\n  Witregels.  ');editor.aliases.insert('1.0','test snippet\nvariant')
         editor.save();identifier=editor.identifier

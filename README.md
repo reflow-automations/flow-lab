@@ -133,6 +133,14 @@ Windows-account, zonder administratorrechten. De snelkoppelingen verwijzen naar
 deze projectmap: verplaats of verwijder die map niet. Wil je de koppelingen weg,
 verwijder dan de twee Flow Lab-snelkoppelingen; je persoonlijke data blijft staan.
 
+De snelkoppeling start rechtstreeks de Python-windowlauncher. Tijdens opstarten
+verschijnt een klein laadvenster. Herhaald klikken deelt dezelfde start; er wordt
+geen tweede server gestart. Bestaande processen worden hergebruikt. Opstartstappen
+en doorlooptijden staan zonder sleutels in `logs/launcher-last-run.json` en de
+afzonderlijke `logs/launcher-*.json`-bestanden. Een vastgelopen start krijgt een
+begrensde wachttijd en een zichtbare foutmelding. Voer na een update eenmaal
+`Install-FlowLab.ps1` uit om oudere PowerShell-snelkoppelingen bij te werken.
+
 ## Dicteren en sneltoetsen
 
 1. Klik in het gewenste tekstvak, eventueel met een selectie om te vervangen.
@@ -190,6 +198,30 @@ de bestaande tekst rondom de cursor niet klopt met de verwachting, meldt de app
 dat de dictatie compleet is en vraagt zij de eventuele bestaande tekst te controleren.
 Er wordt dan niet opnieuw geplakt en niet onnodig op dezelfde controle gewacht.
 
+## Een mislukte opname opnieuw verwerken
+
+Onder **Dicteren > Opname herstellen** staan mislukte desktopopnames. Kies een
+opname en klik **Opnieuw verwerken**. Er wordt geen nieuwe microfoonopname gestart.
+Het oorspronkelijke modelprofiel wordt gebruikt; een oorspronkelijk gekozen
+cloudformatter kan dus opnieuw tekst naar diezelfde provider sturen.
+
+Bij een netwerkfout tijdens het spreken blijft Flow Lab lokaal opnemen totdat je
+stopt. Bij stoppen wordt een herstelkopie versleuteld met Windows DPAPI opgeslagen
+onder `data/recovery/`. Deze is alleen onder hetzelfde Windows-account te lezen.
+De kopie verdwijnt nadat een eindresultaat bevestigd is. Bij een fout blijft ze
+beschikbaar, ook na herstart, tot herstel of **Opname verwijderen**. Maximaal drie
+openstaande herstelopnames; een vierde opname start pas als je ruimte vrijmaakt.
+Oudere mislukte opnames worden niet automatisch overschreven. Bij opslagproblemen
+blijft een kopie alleen in geheugen en waarschuwt de app om nog niet af te sluiten.
+
+Een herstelde tekst komt in de app en geschiedenis. Kies daarna zelf het gewenste
+tekstvak en druk Alt+Shift+Z, of kopieer de tekst. De oude cursorpositie wordt niet
+automatisch opnieuw gebruikt. Een herhaalde herstelpoging met hetzelfde opname-ID
+haalt een al bewaard resultaat op en maakt geen dubbele geschiedenisregel.
+Een expliciet geannuleerde opname wordt niet bewaard. Dit herstelt geen audio die
+door een oudere versie al verloren is gegaan. De herstelroute geldt voor de
+desktophelper; de optionele browserrecorder heeft deze audiobewaring niet.
+
 ## Snippets, woordenboek en geschiedenis
 
 Gebruik de gelijknamige tabbladen in de eigen app. Daar kun je zoeken, selecteren,
@@ -246,7 +278,10 @@ het lokale schema kan wijzigen.
 Desktop start standaard lokaal. Browservoorkeuren staan apart en kunnen hybride/cloud
 selecteren: controleer de keuzelijsten. Geen automatische cloudterugval bij offlinekeuze.
 
-Microfoonaudio blijft standaard in geheugen. Voltooide tekst en metadata staan
+Desktopaudio wordt tijdens opname in geheugen gehouden; bij stoppen ontstaat een
+versleutelde tijdelijke herstelkopie totdat het resultaat bevestigd is. Alleen
+mislukte desktopopnames blijven staan tot herstel of verwijderen. Browseraudio
+blijft in geheugen. Voltooide tekst en metadata staan
 maximaal 30 dagen in `data/flow-lab.sqlite`. Opruimen gebeurt bij opstarten,
 lezen/opslaan en periodiek tijdens gebruik. De database is niet door Flow Lab
 versleuteld; je Windows-account en schijfbeveiliging bepalen de lokale toegang.

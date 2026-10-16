@@ -74,6 +74,11 @@ def add_history(raw,text,metadata,identifier=None,created_at=None):
         c.execute('INSERT OR IGNORE INTO history VALUES(?,?,?,?,?)',(identifier,time.time() if created_at is None else created_at,raw,text,json.dumps(metadata,ensure_ascii=False)))
     return identifier
 
+def history_result(identifier):
+    with connect() as c:row=c.execute('SELECT raw,text,metadata FROM history WHERE id=?',(identifier,)).fetchone()
+    if not row:return None
+    return {**json.loads(row['metadata']),'raw':row['raw'],'text':row['text'],'history_id':identifier}
+
 def history(query='',limit=50,offset=0):
     prune();query=query[:200];limit=max(1,min(int(limit),100));offset=max(0,int(offset))
     escaped=query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
