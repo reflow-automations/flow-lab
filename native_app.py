@@ -39,10 +39,11 @@ class NativeApp:
         ttk.Label(shell,text='Spreken, opmaken en terugvinden. Op jouw pc.',style='Flow.TLabel').pack(anchor='w',pady=(3,18))
         self.notebook=ttk.Notebook(shell);self.notebook.pack(fill='both',expand=True)
         self.tabs={}
-        for key,label in [('home','Dicteren'),('history','Geschiedenis'),('dictionary','Woordenboek'),('snippets','Snippets'),('settings','Instellingen'),('openrouter','OpenRouter')]:
+        for key,label in [('home','Dicteren'),('history','Geschiedenis'),('dictionary','Woordenboek'),('snippets','Snippets'),('settings','Instellingen'),('openrouter','OpenRouter'),('learning','Recent geleerd')]:
             tab=ttk.Frame(self.notebook,padding=18);self.tabs[key]=tab;self.notebook.add(tab,text=label)
         self.build_home();self.build_history();self.build_settings();self.build_openrouter()
         self.editors={kind:LibraryEditor(self,kind,self.tabs['snippets' if kind=='snippet' else 'dictionary']) for kind in ('dictionary','snippet')}
+        self.build_learning()
         self.status=tk.StringVar(value='Verbinden met de lokale verwerking...')
         ttk.Label(shell,textvariable=self.status,style='Flow.TLabel').pack(anchor='w',pady=(12,4))
         footer=ttk.Frame(shell,style='Flow.TFrame');footer.pack(fill='x')
@@ -88,10 +89,20 @@ class NativeApp:
         elif selected==str(self.tabs['snippets']):self.editors['snippet'].load()
         elif selected==str(self.tabs['settings']):self.refresh_settings()
         elif selected==str(self.tabs['openrouter']):self.load_openrouter_status()
+        elif selected==str(self.tabs['learning']):self.refresh_learning()
         else:self.refresh_home()
 
     def build_settings(self):
-        tab=self.tabs['settings']
+        outer=self.tabs['settings']
+        self.settings_canvas=tk.Canvas(outer,highlightthickness=0)
+        scroll=ttk.Scrollbar(outer,orient='vertical',command=self.settings_canvas.yview)
+        scroll.pack(side='right',fill='y')
+        self.settings_canvas.pack(side='left',fill='both',expand=True)
+        self.settings_canvas.configure(yscrollcommand=scroll.set)
+        tab=ttk.Frame(self.settings_canvas)
+        item=self.settings_canvas.create_window(0,0,window=tab,anchor='nw')
+        tab.bind('<Configure>',lambda _:self.settings_canvas.configure(scrollregion=self.settings_canvas.bbox('all')))
+        self.settings_canvas.bind('<Configure>',lambda event:self.settings_canvas.itemconfigure(item,width=event.width))
         shortcuts=ttk.LabelFrame(tab,text='Sneltoetsen',padding=14);shortcuts.pack(fill='x')
         self.settings_status=tk.StringVar();ttk.Label(shortcuts,textvariable=self.settings_status).pack(anchor='w')
         row=ttk.Frame(shortcuts);row.pack(fill='x',pady=12)
@@ -135,13 +146,19 @@ class NativeApp:
         ttk.Label(options,textvariable=self.settings_model_hint,wraplength=300,justify='left').grid(row=0,column=2,rowspan=3,sticky='nw',padx=(24,0))
         ttk.Button(options,text='Welke modellen kies ik?',command=self.show_model_guide).grid(row=3,column=2,sticky='w',padx=(24,0),pady=(9,0))
         ttk.Button(tab,text='OpenRouter instellen (optioneel)',command=lambda:self.show('openrouter')).pack(anchor='w',pady=(0,8))
+        self.learning_enabled=tk.BooleanVar(value=self.app.config.get('auto_learn',False))
+        ttk.Checkbutton(tab,text='Automatisch leren van mijn woordcorrecties',variable=self.learning_enabled,
+                        command=lambda:self.app.events.put(('learning_toggle',self.learning_enabled.get()))).pack(anchor='w')
+        ttk.Label(tab,text='Verbeter binnen een minuut in hetzelfde tekstvak. Na 1,5 seconde rust wordt een duidelijke correctie beoordeeld.',wraplength=850).pack(anchor='w',pady=(3,6))
+        ttk.Button(tab,text='Recent geleerde correcties bekijken',command=lambda:self.show('learning')).pack(anchor='w',pady=(0,6))
         def explain_settings(*_):
             selected=self.preference_choices['formatter'].get(self.preference_vars['formatter'].get(),'local')
             self.settings_model_hint.set(self.model_guide['desktop'][selected])
         self.preference_vars['formatter'].trace_add('write',explain_settings);explain_settings()
-        ttk.Label(tab,text='Volledig lokaal stuurt geen audio of tekst naar OpenAI. Bij cloudopmaak gaat alleen de herkende tekst naar OpenAI.\nInstellingen en geschiedenis blijven op deze pc; audio wordt niet bewaard.',wraplength=850).pack(anchor='w')
+        ttk.Label(tab,text='Volledig lokaal houdt audio en tekst op deze pc. Audio blijft 24 uur versleuteld bewaard voor opnieuw verwerken.\nBij cloudopmaak gaat alleen de herkende tekst naar de gekozen provider.',wraplength=850).pack(anchor='w')
 
     def refresh_settings(self):
+        self.learning_enabled.set(self.app.config.get('auto_learn',False))
         self.settings_status.set('Actieve dicteersneltoets: '+shortcut_label(self.app.config['hotkey']))
         for key,var in self.preference_vars.items():
             value=self.app.config.get(key,{'style':'bericht','paragraphs':'normaal','formatter':'local'}[key])
@@ -149,6 +166,58 @@ class NativeApp:
         import desktop_windows as w
         replay=w.REPLAY_KEYS.get(self.app.replay_key,(None,None,'Niet beschikbaar'))[2]
         self.settings_replay.set('Laatste resultaat opnieuw plaatsen: '+replay)
+
+    def build_learning(self):
+        tab=self.tabs['learning']
+        ttk.Label(tab,text='Jouw schrijfwijzen leren',font=('Segoe UI',16,'bold')).pack(anchor='w')
+        ttk.Label(tab,text='Duidelijke correcties naar bekende namen worden onthouden. Nieuwe woorden vragen herhaling; twijfelgevallen blijven een voorstel.\nJe kunt hier aannemen, negeren of alleen de geleerde wijziging ongedaan maken.',wraplength=850).pack(anchor='w',pady=(8,12))
+        self.learning_status=tk.StringVar(value='Correcties worden lokaal beoordeeld. Volledige tekstvelden worden niet opgeslagen.')
+        ttk.Label(tab,textvariable=self.learning_status,wraplength=850).pack(anchor='w',pady=(0,10))
+        self.learning_rows={}
+        self.learning_tree=ttk.Treeview(tab,columns=('wrong','right','state','count'),show='headings',selectmode='browse')
+        for key,label,width in [('wrong','Gehoorde schrijfwijze',235),('right','Jouw correctie',235),('state','Status',160),('count','Dictaten',70)]:
+            self.learning_tree.heading(key,text=label);self.learning_tree.column(key,width=width)
+        self.learning_tree.pack(fill='both',expand=True)
+        self.learning_tree.bind('<<TreeviewSelect>>',lambda _:self.learning_selection())
+        self.learning_detail=tk.StringVar();ttk.Label(tab,textvariable=self.learning_detail,wraplength=850).pack(anchor='w',pady=10)
+        buttons=ttk.Frame(tab);buttons.pack(fill='x')
+        self.learning_buttons={}
+        for action,label in [('accept','Onthouden'),('ignore','Negeren'),('undo','Ongedaan maken')]:
+            button=ttk.Button(buttons,text=label,command=lambda a=action:self.review_learning(a),state='disabled')
+            button.pack(side='left',padx=(0,8));self.learning_buttons[action]=button
+        ttk.Button(buttons,text='Vernieuwen',command=self.load_learning).pack(side='right')
+
+    def refresh_learning(self):
+        self.learning_enabled.set(self.app.config.get('auto_learn',False));self.load_learning()
+
+    def load_learning(self):
+        def loaded(data,error):
+            if error:self.learning_detail.set(error);return
+            selection=self.learning_tree.selection()
+            self.learning_rows={row['id']:row for row in data['items']}
+            self.learning_tree.delete(*self.learning_tree.get_children())
+            labels={'pending':'Voorstel','learned':'Onthouden','ignored':'Genegeerd','undone':'Ongedaan','withdrawn':'Teruggenomen','conflict':'Controle nodig','covered':'Staat al in woordenboek'}
+            for row in data['items']:
+                self.learning_tree.insert('','end',iid=row['id'],values=(row['wrong'],row['right'],labels.get(row['state'],row['state']),row['observations']))
+            if selection and selection[0] in self.learning_rows:self.learning_tree.selection_set(selection[0])
+            self.learning_selection()
+        self.request('/api/learning',loaded)
+
+    def learning_selection(self):
+        selected=self.learning_tree.selection();row=self.learning_rows.get(selected[0]) if selected else None
+        for action,button in self.learning_buttons.items():
+            allowed=bool(row) and ((action=='undo' and row['state']=='learned') or (action=='accept' and row['state'] in ('pending','ignored','undone','withdrawn')) or action=='ignore' and row['state'] in ('pending','learned'))
+            button.configure(state='normal' if allowed else 'disabled')
+        self.learning_detail.set(row['reason'] if row else 'Selecteer een schrijfwijze om deze te beheren.')
+
+    def review_learning(self,action):
+        selected=self.learning_tree.selection()
+        if not selected:return
+        for button in self.learning_buttons.values():button.configure(state='disabled')
+        def reviewed(data,error):
+            self.learning_detail.set(error if error else 'Bijgewerkt. De schrijfwijze geldt vanaf je volgende dictaat.')
+            self.load_learning()
+        self.request('/api/learning/'+quote(selected[0],safe='')+'/'+action,reviewed,'POST',{})
 
     def build_home(self):
         tab=self.tabs['home']
@@ -373,7 +442,7 @@ class LibraryEditor:
         if self.busy:return
         self.tree.delete(*self.tree.get_children());term=self.search.get().casefold()
         for row in self.rows.values():
-            if term in (row['name']+' '+' '.join(row['aliases'])).casefold():self.tree.insert('','end',iid=row['id'],values=(row['name']+(' (uit)' if not row['enabled'] else ''),))
+            if term in (row['name']+' '+' '.join(row['aliases'])).casefold():self.tree.insert('','end',iid=row['id'],values=(row['name']+(' (uit)' if not row['enabled'] else '')+(' (geleerd)' if row['source']=='auto-learn' else ''),))
 
     def clear(self):
         if self.busy:return

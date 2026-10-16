@@ -27,7 +27,12 @@ def init():
         CREATE TABLE IF NOT EXISTS history(id TEXT PRIMARY KEY,created_at REAL NOT NULL,raw TEXT NOT NULL,text TEXT NOT NULL,metadata TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS history_time ON history(created_at DESC);
         CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS learning_cases(id TEXT PRIMARY KEY,wrong TEXT NOT NULL,right TEXT NOT NULL,wrong_key TEXT NOT NULL,right_key TEXT NOT NULL,mode TEXT NOT NULL,state TEXT NOT NULL,reason TEXT NOT NULL,target_id TEXT,entry_id TEXT,entry_revision REAL,created_entry INTEGER NOT NULL DEFAULT 0,created_at REAL NOT NULL,updated_at REAL NOT NULL,UNIQUE(wrong_key,right_key));
+        CREATE TABLE IF NOT EXISTS learning_evidence(case_id TEXT NOT NULL,dictation_id TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(case_id,dictation_id));
+        CREATE TABLE IF NOT EXISTS learning_blocks(word_key TEXT PRIMARY KEY,created_at REAL NOT NULL);
         ''')
+        if 'target_id' not in {row[1] for row in c.execute('PRAGMA table_info(learning_cases)')}:
+            c.execute('ALTER TABLE learning_cases ADD COLUMN target_id TEXT')
         if not c.execute('SELECT 1 FROM entries LIMIT 1').fetchone():
             initial=json.loads((ROOT/'dictionary.json').read_text(encoding='utf-8')).get('replacements',{})
             for alias,value in initial.items():
@@ -54,18 +59,31 @@ def save_entry(kind,data,source='user'):
     if any(not alias_key(a) for a in aliases):raise ValueError('Een variant moet een woord bevatten.')
     identifier=str(data.get('id') or uuid.uuid4());enabled=bool(data.get('enabled',True))
     with connect() as c:
-        prior=c.execute('SELECT kind,source FROM entries WHERE id=?',(identifier,)).fetchone()
+        prior=c.execute('SELECT * FROM entries WHERE id=?',(identifier,)).fetchone()
         if prior and prior['kind']!=kind:raise ValueError('Dit item heeft een ander type.')
         wanted={alias_key(a) for a in aliases}
         if enabled:
             for row in c.execute('SELECT id,name,aliases FROM entries WHERE kind=? AND enabled=1 AND id<>?',(kind,identifier)):
                 if wanted.intersection(alias_key(a) for a in json.loads(row['aliases'])):raise ValueError('Een variant wordt al gebruikt door '+row['name']+'.')
         effective_source=source if source=='user' else (prior['source'] if prior and prior['source']=='user' else source)
+        if kind=='dictionary' and source=='user':
+            prior_keys={alias_key(a) for a in json.loads(prior['aliases'])} if prior else set()
+            removed=prior_keys-wanted
+            if not enabled:removed|=wanted|{alias_key(value)}
+            for key in removed:c.execute('INSERT OR REPLACE INTO learning_blocks VALUES(?,?)',(key,time.time()))
+            if enabled:
+                for key in wanted|{alias_key(value)}:c.execute('DELETE FROM learning_blocks WHERE word_key=?',(key,))
         c.execute('INSERT INTO entries VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,aliases=excluded.aliases,value=excluded.value,enabled=excluded.enabled,source=excluded.source,updated_at=excluded.updated_at',(identifier,kind,name,json.dumps(aliases,ensure_ascii=False),value,int(enabled),effective_source,time.time()))
     return identifier
 
 def delete_entry(kind,identifier):
-    with connect() as c:c.execute('DELETE FROM entries WHERE kind=? AND id=?',(kind,identifier))
+    with connect() as c:
+        if kind=='dictionary':
+            row=c.execute('SELECT value,aliases FROM entries WHERE kind=? AND id=?',(kind,identifier)).fetchone()
+            if row:
+                for value in [row['value'],*json.loads(row['aliases'])]:
+                    c.execute('INSERT OR REPLACE INTO learning_blocks VALUES(?,?)',(alias_key(value),time.time()))
+        c.execute('DELETE FROM entries WHERE kind=? AND id=?',(kind,identifier))
 
 def add_history(raw,text,metadata,identifier=None,created_at=None):
     if not text.strip():return None

@@ -23,6 +23,7 @@ merkassets en is niet verbonden aan Wispr Flow.
 - Plak het laatste bewaarde resultaat opnieuw met Alt+Shift+Z.
 - Beheer eigen woorden, spellingregels en exacte snippets met herkenningsvarianten.
 - Zoek en kopieer transcripties uit de afgelopen 30 dagen.
+- Laat geschikte woordcorrecties na dictatie lokaal leren, met voorstellen en ongedaan maken.
 
 ## Gebruikt dit Ollama?
 
@@ -275,9 +276,38 @@ vervangt een opgegeven herkenningsvariant door de gewenste spelling. Een geïmpo
 Spellinghint is een woord zonder vaste vervangregel. Die hints worden momenteel alleen
 meegegeven aan cloud-spraakherkenning, binnen de limiet van de hints-lijst. Ze worden
 niet gebruikt door lokale Parakeet/Whisper, ook niet bij lokale audio met cloudopmaak.
-Gewone correctieregels werken wel in de lokale en hybride route. Flow Lab leert nog
-niet automatisch van tekst die je na het plakken in andere programma's corrigeert.
+Gewone correctieregels werken wel in de lokale en hybride route.
 Een hint zelf opslaan in de editor maakt er een expliciete correctieregel van.
+
+### Automatisch leren van correcties
+
+Zet onder **Instellingen** de optie **Automatisch leren van mijn woordcorrecties**
+aan. Deze optie staat bij een nieuwe installatie standaard uit. Na een nieuwe
+desktopdictatie volgt Flow Lab maximaal 60 seconden hetzelfde tekstvak. Verbeter
+een woord gewoon op je eigen tempo. Ongeveer 1,5 seconde na de laatste tekstwijziging
+wordt de correctie beoordeeld. Bij een ander veld, ander venster of nieuw dictaat
+stopt het volgen. Het veld moet via Windows betrouwbaar uitleesbaar zijn.
+
+- Een duidelijke variant van een al bekende naam wordt aan de bestaande regel toegevoegd.
+- Een nieuwe naam midden in een zin vraagt dezelfde correctie in twee aparte dictaten.
+- Korte, dubbelzinnige of sterk afwijkende varianten blijven een voorstel.
+- Onder **Recent geleerd** kun je voorstellen onthouden of negeren en een geleerde
+  wijziging gericht ongedaan maken. Het gewone woordenboek blijft bewerkbaar.
+
+Dit leert lokale vervangregels voor volgende dictaten, geen nieuw spraakmodel.
+Er zijn geen extra AI-aanroepen of API-kosten. Volledige veldinhoud wordt alleen
+tijdelijk in geheugen vergeleken. Alleen het woordpaar, een willekeurig dictaat-ID
+en de leerstatus worden lokaal opgeslagen. Open voorstellen en teruggenomen
+correcties ouder dan 30 dagen worden bij het ophalen van de lijst opgeruimd;
+geleerde regels en bewuste negeerkeuzes blijven behouden. De lijst toont de laatste
+100 gevallen.
+
+Snippets, de letterlijke schrijfstijl, herstelde opnames en opnieuw plaatsen via
+Alt+Shift+Z doen niet mee. Toevoegingen alleen, grote herschrijvingen, getallen,
+herkende code/URL's en geciteerde voorbeelden worden overgeslagen. De filters zijn
+bewust terughoudend, maar zijn geen volledige inhoudelijke beoordeling. Niet alle
+apps geven wijzigingen goed door. Bij een vastgelopen uitlezing stopt alleen het
+leren tot de volgende appstart; dicteren en plaatsen blijven apart werken.
 
 ### Optionele import uit je eigen Wispr-installatie
 

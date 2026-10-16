@@ -24,6 +24,8 @@ from compact_overlay import CompactOverlay
 from limits import MAX_SECONDS,SESSION_TIMEOUT_SECONDS,AudioBudget
 from recovery import RecoveryStore,wav_bytes
 from insertion_log import write_report,prune_reports
+from correction_learning import Repository as LearningRepository
+from correction_watch import Watcher as CorrectionWatcher
 
 ROOT = Path(__file__).resolve().parent
 STATE = ROOT / 'data/desktop-status.json'
@@ -33,7 +35,7 @@ QUIT_MESSAGE = 0x8051
 SETTINGS_MESSAGE = 0x8052
 OPEN_MESSAGE = 0x8053
 QUIT_ALL_MESSAGE = 0x8054
-PANEL_IDS={0:'home',1:'history',2:'dictionary',3:'snippets',4:'settings',5:'openrouter'}
+PANEL_IDS={0:'home',1:'history',2:'dictionary',3:'snippets',4:'settings',5:'openrouter',6:'learning'}
 
 def stored_status():
     try:
@@ -45,7 +47,7 @@ def stored_status():
     return None
 
 def settings():
-    defaults = dict(engine='parakeet', formatter='local', paragraphs='normaal', style='bericht',hotkey='ctrl-shift-space')
+    defaults = dict(engine='parakeet', formatter='local', paragraphs='normaal', style='bericht',hotkey='ctrl-shift-space',auto_learn=False)
     try:
         values = {k.lower(): v for k, v in json.loads(CONFIG.read_text(encoding='utf-8')).items()}
         defaults.update({k: values[k] for k in defaults if k in values})
@@ -53,6 +55,7 @@ def settings():
         pass
     try:defaults['hotkey']=shortcut(defaults['hotkey'])[0]
     except (ValueError,AttributeError):defaults['hotkey']='ctrl-shift-space'
+    defaults['auto_learn']=defaults.get('auto_learn') is True
     return defaults
 
 def amplitude(pcm):
@@ -213,6 +216,8 @@ class Desktop:
         self.shortcut_dialog = None
         self.levels = deque([0.] * 23, maxlen=23)
         self.uia = w.UiaWorker()
+        self.learner=CorrectionWatcher(w.UiaWorker,w.learning_snapshot,LearningRepository(),
+                                      lambda:self.config.get('auto_learn',False),lambda status:self.events.put(('learning_update',status)))
         try:C.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Reflow.FlowLab')
         except OSError:pass
         self.root = tk.Tk()
@@ -276,7 +281,8 @@ class Desktop:
         main_hwnd=int(w.ancestor(control.root.winfo_id(),2) or 0) if control and control.exists() else None
         main_visible=bool(control and control.exists() and control.root.state()!='withdrawn')
         main_panel=next((key for key,tab in control.tabs.items() if str(tab)==control.notebook.select()),None) if control and control.exists() else None
-        STATE.write_text(json.dumps(dict(pid=os.getpid(), hwnd=self.hwnd, caption=self.caption, test=self.test, hotkey=self.config['hotkey'], registered=self.main_registered, replay_hotkey=self.replay_key, replay_registered=self.replay_registered, state=self.state, gesture=self.gesture.mode, controls='hold-double-tap', overlay_size=[156,36], ui='native-tk',main_window=main_hwnd,main_visible=main_visible,main_panel=main_panel), indent=2), encoding='utf-8')
+        learner=getattr(self,'learner',None)
+        STATE.write_text(json.dumps(dict(pid=os.getpid(), hwnd=self.hwnd, caption=self.caption, test=self.test, hotkey=self.config['hotkey'], registered=self.main_registered, replay_hotkey=self.replay_key, replay_registered=self.replay_registered, state=self.state, gesture=self.gesture.mode, controls='hold-double-tap', overlay_size=[156,36], ui='native-tk',main_window=main_hwnd,main_visible=main_visible,main_panel=main_panel,auto_learn=self.config.get('auto_learn',False),learning_stalled=bool(learner and learner.stalled)), indent=2), encoding='utf-8')
 
     def display(self, text):
         self.overlay.render(self.state,self.levels,self.gesture.mode=='locked')
@@ -346,6 +352,7 @@ class Desktop:
 
     def start(self):
         if self.current or self.state!='idle': return
+        if getattr(self,'learner',None):self.learner.stop()
         if not self.recovery_store.can_record():
             self.gesture.reset()
             self.remember_status('Audio-opslag is vol (500 MB). Verwijder een bewaarde opname in Dicteren.')
@@ -399,6 +406,7 @@ class Desktop:
 
     def replay(self):
         if self.state!='idle': return
+        if getattr(self,'learner',None):self.learner.stop()
         self.ident+=1; ident=self.ident; hwnd=w.foreground()
         self.replay_started=time.monotonic()
         self.state='starting'; self.hotkeys.command('escape',True)
@@ -415,6 +423,7 @@ class Desktop:
         threading.Thread(target=prepare,daemon=True).start()
 
     def cancel(self):
+        if getattr(self,'learner',None):self.learner.stop()
         self.gesture.reset()
         self.ident += 1
         if self.current:
@@ -427,6 +436,7 @@ class Desktop:
 
     def retry_recording(self,recording_id):
         if self.state!='idle':return
+        if getattr(self,'learner',None):self.learner.stop()
         self.ident+=1;ident=self.ident
         self.state='processing';self.hotkeys.command('escape',True)
         self.current=SimpleNamespace(cancel=threading.Event(),stop=threading.Event(),recovery_id=recording_id)
@@ -481,6 +491,10 @@ class Desktop:
         session.history_id=result.get('history_id') or getattr(session,'recording_id',None)
         session.insertion_stage='result_check';session.failed_stage=None;session.clipboard_restore='not_changed'
         text = result.get('text', '')
+        if getattr(session,'target',None):
+            session.target.learning_requested=bool(getattr(self,'config',{}).get('auto_learn') and getattr(session,'recording_id',None)
+                and getattr(session,'config',{}).get('style')!='letterlijk' and not result.get('snippets')
+                and not (result.get('raw') or '').casefold().startswith('type letterlijk'))
         backup = None; own_sequence = None
         ok = False; complete=False; paste_sent=False; reason = 'Geen tekst ontvangen'
         try:
@@ -585,6 +599,19 @@ class Desktop:
                     window,callback,result,error=args
                     window.deliver(callback,result,error);continue
                 if kind == 'open': self.open_app(args[0] if args else 'home'); continue
+                if kind == 'learning_toggle':
+                    self.config['auto_learn']=args[0] is True
+                    if not self.config['auto_learn']:self.learner.stop()
+                    CONFIG.write_text(json.dumps(self.config,indent=2),encoding='utf-8')
+                    if self.control_window and self.control_window.exists():self.control_window.refresh_learning()
+                    continue
+                if kind == 'learning_update':
+                    if self.control_window and self.control_window.exists():
+                        if args[0]=='stalled':self.control_window.learning_status.set('Leren gepauzeerd: dit tekstvak reageerde te langzaam. Herstart Flow Lab om opnieuw te proberen.')
+                        elif self.config.get('auto_learn'):
+                            self.control_window.learning_status.set('Een correctie is geleerd of staat klaar als voorstel. Bekijk Recent geleerd.')
+                            if self.control_window.notebook.select()==str(self.control_window.tabs['learning']):self.control_window.load_learning()
+                    continue
                 if kind == 'retry_recording':self.retry_recording(args[0]);continue
                 if kind == 'discard_recording':
                     if self.state=='idle':
@@ -693,6 +720,9 @@ class Desktop:
                     self.last_text=args[0].get('text',''); self.state='inserting'; self.display('Tekst plaatsen...')
                     threading.Thread(target=self.insert,args=(self.current,args[0]),daemon=True).start()
                 elif kind == 'inserted':
+                    target=getattr(self.current,'target',None)
+                    if target and target.learning_requested and target.learning_basis:
+                        self.learner.begin(target.hwnd,target.runtime,target.learning_basis,getattr(self.current,'recording_id',None))
                     hide_delay=700 if args[0] or getattr(self.current,'paste_sent',False) else 15000
                     timings=getattr(self.current,'timings',{})
                     timing=timings.get('release_to_verified_ms',timings.get('release_to_complete_text_ms'))
@@ -744,6 +774,7 @@ class Desktop:
         self.root.after(2500,self.quit)
 
     def quit(self):
+        if getattr(self,'learner',None):self.learner.stop()
         if self.current: self.current.cancel.set(); self.current.stop.set()
         self.hotkeys.close()
         if self.tray: self.tray.stop()

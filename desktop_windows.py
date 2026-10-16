@@ -183,6 +183,8 @@ class Target:
     native_edit:int=0
     native_selection:tuple=()
     details:dict=field(default_factory=dict)
+    learning_requested:bool=False
+    learning_basis:dict|None=None
 
 def edit_selection(hwnd):
     start=W.DWORD();end=W.DWORD();result=SIZE()
@@ -292,6 +294,9 @@ def verify_target(uia,U,t,text):
         focused=uia.GetFocusedElement()
         if focused and tuple(focused.GetRuntimeId())==t.runtime:e=focused
         actual=norm(field_text(e,U)).rstrip('\n')
+        if getattr(t,'learning_requested',False):
+            from correction_learning import basis_for_placement
+            t.learning_basis=basis_for_placement(actual,text,t.prefix,t.suffix)
         t.details.update(expected_length=len(expected),actual_length=len(actual))
         dictated=norm(text).rstrip('\n')
         t.details.update(whole_field_equals_dictation=actual==dictated,
@@ -303,6 +308,9 @@ def verify_target(uia,U,t,text):
         value=pattern(e,U,'UIA_ValuePatternId','IUIAutomationValuePattern')
         if value:
             actual_value=norm(value.CurrentValue).rstrip('\n')
+            if getattr(t,'learning_requested',False) and not t.learning_basis:
+                from correction_learning import basis_for_placement
+                t.learning_basis=basis_for_placement(actual_value,text,t.prefix,t.suffix)
             t.details['value_length']=len(actual_value)
             if actual_value==expected:
                 t.details['verification']='value_pattern';return True
@@ -310,6 +318,23 @@ def verify_target(uia,U,t,text):
         return False
     except Exception:
         t.details['verification']='provider_error';return False
+
+def learning_snapshot(uia,U,hwnd,runtime):
+    """Read only the original focused edit. Never inspect a newly focused field."""
+    if foreground()!=hwnd:return None
+    element=uia.GetFocusedElement()
+    if not element or tuple(element.GetRuntimeId())!=tuple(runtime):return None
+    if element.CurrentIsPassword or not element.CurrentIsEnabled:return None
+    value=pattern(element,U,'UIA_ValuePatternId','IUIAutomationValuePattern')
+    if value and value.CurrentIsReadOnly:return None
+    editing=pattern(element,U,'UIA_TextEditPatternId','IUIAutomationTextEditPattern')
+    composing=False
+    if editing:
+        composition=editing.GetActiveComposition()
+        composing=bool(composition and composition.GetText(1))
+    text=norm(field_text(element,U)).rstrip('\n')
+    if len(text)>40000 or foreground()!=hwnd:return None
+    return {'text':text,'composing':composing}
 
 _open=api(user,'OpenClipboard',[W.HWND],W.BOOL);_close=api(user,'CloseClipboard',[],W.BOOL)
 _empty=api(user,'EmptyClipboard',[],W.BOOL);_enum=api(user,'EnumClipboardFormats',[W.UINT],W.UINT)

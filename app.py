@@ -63,6 +63,17 @@ def remember(result,raw,source,engine,formatter,style,paragraphs,duration=None,r
 async def library():
     return {'dictionary':storage.entries('dictionary'),'snippets':storage.entries('snippet')}
 
+@app.get('/api/learning')
+async def learning_list():
+    from correction_learning import Repository
+    return {'items':Repository().list()}
+
+@app.post('/api/learning/{identifier}/{action}')
+async def learning_review(identifier:str,action:str):
+    from correction_learning import Repository
+    try:return {'item':Repository().review(identifier,action)}
+    except ValueError as exc:raise HTTPException(400,str(exc))
+
 @app.get('/api/openrouter/status')
 async def openrouter_status():return openrouter_provider.status()
 

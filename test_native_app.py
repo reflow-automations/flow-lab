@@ -44,12 +44,27 @@ def test_native_window_library_history_roundtrip(monkeypatch,tk_window):
         window.load_history();window.history_tree.selection_set(history_id);window.select_history()
         assert window.history_text.get('1.0','end-1c')=='Twee\n\nalinea’s'
         window.hide();assert window.root.state()=='withdrawn'
-        assert len(window.notebook.tabs())==6
+        assert len(window.notebook.tabs())==7
+        from correction_learning import Repository,candidates
+        repo=Repository()
+        storage.save_entry('dictionary',{'value':'Lunaro','aliases':['loenaro']})
+        repo.observe('native-test',candidates('Ik spreek XYZ.','Ik spreek Lunaro.',repo.catalog()))
+        window.load_learning();case=repo.list()[0]
+        window.learning_tree.selection_set(case['id']);window.learning_selection()
+        assert str(window.learning_buttons['accept']['state'])=='normal'
+        window.learning_buttons['accept'].invoke()
+        assert repo.list()[0]['state']=='learned'
+        window.learning_tree.selection_set(case['id']);window.learning_selection()
+        window.learning_buttons['undo'].invoke()
+        assert repo.list()[0]['state']=='undone'
         def descendants(widget):
             for child in widget.winfo_children():
                 yield child
                 yield from descendants(child)
         buttons={str(w.cget('text')):w for w in descendants(window.tabs['settings']) if w.winfo_class()=='TButton'}
+        checks={str(w.cget('text')):w for w in descendants(window.tabs['settings']) if w.winfo_class()=='TCheckbutton'}
+        checks['Automatisch leren van mijn woordcorrecties'].invoke()
+        assert fake.events.get()==('learning_toggle',True)
         buttons['Ctrl+Windows kiezen'].invoke();buttons['Sneltoets opslaan'].invoke()
         assert fake.events.get()==('key','ctrl-win')
         window.preference_vars['paragraphs'].set('Meer witregels')
