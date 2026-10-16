@@ -320,10 +320,15 @@ _copy_image=api(user,'CopyImage',[W.HANDLE,W.UINT,C.c_int,C.c_int,W.UINT],W.HAND
 _delete_object=api(gdi,'DeleteObject',[W.HANDLE],W.BOOL)
 _copy_emf=api(gdi,'CopyEnhMetaFileW',[W.HANDLE,W.LPCWSTR],W.HANDLE);_delete_emf=api(gdi,'DeleteEnhMetaFile',[W.HANDLE],W.BOOL)
 def open_clipboard(hwnd):
-    for _ in range(8):
+    for _ in range(20):
         if _open(hwnd):return
         time.sleep(.025)
     raise OSError('Klembord is bezet')
+
+class ClipboardBackupError(OSError):
+    def __init__(self,message,formats,failed_format):
+        super().__init__(message)
+        self.formats=formats;self.failed_format=failed_format
 def put_memory(fmt,data):
     h=_alloc(2,max(1,len(data)))
     if not h:raise OSError('Klembordgeheugen ontbreekt')
@@ -360,7 +365,9 @@ class ClipboardBackup:
                 if not p:raise OSError('Klembordformaat niet uitleesbaar')
                 self.items.append([f,'bytes',C.string_at(p,n)]);_unlock(h)
             self.sequence=clipboard_sequence()
-        except Exception:self.dispose();raise
+        except Exception as exc:
+            self.dispose()
+            raise ClipboardBackupError(str(exc),formats,f) from exc
         finally:_close()
     def restore(self,expected):
         if clipboard_sequence()!=expected:return False

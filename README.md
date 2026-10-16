@@ -195,6 +195,13 @@ verhinderen blijven 15 seconden in het balkje staan en zijn daarna terug te
 lezen in de app, ook na herstart. Alleen de nieuwste plaatsingsdiagnose en
 tijdsmetingen worden lokaal bewaard in `logs/desktop-last-insertion.json`;
 die diagnose bevat geen dictaattekst of klembordinhoud.
+Daarnaast bewaart `logs/desktop-insertions.jsonl` een beperkte geschiedenis per
+plaatsingspoging, met het opname-ID, de foutfase en de herstelstatus van het
+klembord. Zo verdwijnt een mislukking niet achter een latere geslaagde poging.
+Het log wordt begrensd op circa 30 dagen, maximaal 5.000 recente regels en een
+begrensd leesvenster van 8 MB. Het bevat geen transcriptie- of klembordinhoud.
+Een kort bezet klembord wordt vóór de ene plakpoging maximaal 0,5 seconde
+opnieuw geopend; er wordt geen tweede plakcommando verstuurd.
 Sommige chatvelden melden via Windows extra hinttekst. Flow Lab controleert
 daarom apart of de volledige dictatie exact terug te lezen is. Als dat lukt maar
 de bestaande tekst rondom de cursor niet klopt met de verwachting, meldt de app

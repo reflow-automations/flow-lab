@@ -23,6 +23,7 @@ from dictation_gesture import DictationGesture
 from compact_overlay import CompactOverlay
 from limits import MAX_SECONDS,SESSION_TIMEOUT_SECONDS,AudioBudget
 from recovery import RecoveryStore,wav_bytes
+from insertion_log import write_report,prune_reports
 
 ROOT = Path(__file__).resolve().parent
 STATE = ROOT / 'data/desktop-status.json'
@@ -193,6 +194,8 @@ class Desktop:
         self.config = settings()
         self.recovery_store=RecoveryStore(ROOT/'data/recovery')
         self.recovery_store.prune()
+        try:prune_reports(ROOT/'logs',force=True)
+        except OSError:pass
         self.test = test
         self.current = None
         self.last_insertion_message='Dit is een kopie van je laatste tekst. De plaatsingsstatus verschijnt na het dicteren.'
@@ -250,7 +253,9 @@ class Desktop:
         self.root.after(60000,self.cleanup_audio)
 
     def cleanup_audio(self):
-        try:self.recovery_store.prune()
+        try:
+            self.recovery_store.prune()
+            prune_reports(ROOT/'logs')
         finally:self.root.after(60000,self.cleanup_audio)
 
     def prewarm(self):
@@ -473,6 +478,8 @@ class Desktop:
 
     def insert(self, session, result):
         began=time.monotonic()
+        session.history_id=result.get('history_id') or getattr(session,'recording_id',None)
+        session.insertion_stage='result_check';session.failed_stage=None;session.clipboard_restore='not_changed'
         text = result.get('text', '')
         backup = None; own_sequence = None
         ok = False; complete=False; paste_sent=False; reason = 'Geen tekst ontvangen'
@@ -485,23 +492,30 @@ class Desktop:
                 if not w.modifiers_held(): break
                 time.sleep(.02)
             else: reason = 'Sneltoets nog ingedrukt: zelf kopiëren'; return
+            session.insertion_stage='target_check'
             valid, reason = self.uia.submit(w.same_target, session.target).result(timeout=1)
             if not valid or session.cancel.is_set(): return
+            session.insertion_stage='clipboard_backup'
             backup = w.ClipboardBackup(self.hwnd)
+            session.clipboard_formats=[item[0] for item in backup.items] if hasattr(backup,'items') else []
             # Recheck after clipboard acquisition, and never replace a newer clipboard.
+            session.insertion_stage='target_recheck'
             valid, reason = self.uia.submit(w.same_target, session.target).result(timeout=1)
             if not valid or session.cancel.is_set(): return
             if w.clipboard_sequence()!=backup.sequence:
                 reason='Klembord gewijzigd: zelf kopiëren'; return
+            session.insertion_stage='clipboard_write'
             own_sequence = w.copy_text(self.hwnd, text)
             if session.cancel.is_set() or w.foreground()!=session.target.hwnd:
                 reason='Invoegen geannuleerd'; return
+            session.insertion_stage='paste'
             if not w.paste_once(): reason='Windows weigerde invoegen: zelf kopiëren'; return
             paste_sent=True
             if hasattr(session,'timings'):
                 released=getattr(session,'released_at',None)
                 if released is not None:session.timings['release_to_paste_sent_ms']=round((time.monotonic()-released)*1000,1)
             # Wait for the target to consume Ctrl+V before restoring the clipboard.
+            session.insertion_stage='verification'
             for _ in range(12):
                 time.sleep(.05)
                 if self.uia.submit(w.verify_target, session.target, text).result(timeout=.5): ok=True; break
@@ -515,13 +529,18 @@ class Desktop:
             reason=('Ingevoegd' if ok else 'Ingevoegd in leeg tekstvak' if complete
                     else 'Plakken verstuurd; controleer het tekstvak')
         except Exception as exc:
+            session.failed_stage=session.insertion_stage
+            if hasattr(exc,'formats'):session.clipboard_formats=exc.formats;session.failed_format=exc.failed_format
             reason='Niet ingevoegd: '+str(exc)[:105]
         finally:
             if backup:
                 try:
                     restored = backup.restore(own_sequence) if own_sequence is not None else False
+                    session.clipboard_restore='restored' if restored else 'newer_clipboard_preserved' if own_sequence is not None else 'not_changed'
                     if self.test and own_sequence is not None: self.tests['clipboard_restored']=restored
-                except Exception: reason += ' (klembordherstel mislukt)'
+                except Exception:
+                    session.clipboard_restore='error';session.failed_stage=session.failed_stage or 'clipboard_restore'
+                    reason += ' (klembordherstel mislukt)'
                 finally: backup.dispose()
             if hasattr(session,'timings'):
                 session.timings['insertion_ms']=round((time.monotonic()-began)*1000,1)
@@ -536,14 +555,18 @@ class Desktop:
     def record_insertion(self,session,ok,reason,paste_sent):
         target=getattr(session,'target',None)
         report={'time':time.time(),'status':'verified' if ok else 'paste_sent_unverified' if paste_sent else 'blocked',
+                'attempt_id':str(uuid.uuid4()),'recording_id':getattr(session,'history_id',getattr(session,'recording_id',None)),
+                'operation':'dictation' if getattr(session,'recording_id',None) else 'replay',
+                'stage':getattr(session,'insertion_stage',None),'failed_stage':getattr(session,'failed_stage',None),
+                'clipboard_restore':getattr(session,'clipboard_restore','not_changed'),
+                'clipboard_formats':getattr(session,'clipboard_formats',[]),'failed_format':getattr(session,'failed_format',None),
                 'reason':reason,'target_hwnd':getattr(target,'hwnd',None),'target_editable':getattr(target,'editable',False),
                 'capture_reason':getattr(target,'reason',''),'capabilities':getattr(target,'details',{}),
                 'timings':getattr(session,'timings',{})}
         if not ok and paste_sent and report['capabilities'].get('whole_field_equals_dictation'):
             report['status']='complete_dictation_context_unverified'
         try:
-            (ROOT/'logs').mkdir(exist_ok=True)
-            (ROOT/'logs/desktop-last-insertion.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+            write_report(ROOT/'logs',report)
         except OSError:pass
 
     def poll(self):

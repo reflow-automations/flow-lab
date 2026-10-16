@@ -1,5 +1,5 @@
 {
-  "README.md": "aaa258bb77a29b48162882574dfb4710877c5cc0d323e14821eeda344c2348ae",
+  "README.md": "6988b955e955324e6001013e2536294b673b3ad2a84966200b83fe6aba34f32c",
   "LICENSE": "b824b676058a5c84fb920603297d6e8b08cb7acf29024e08d17f730f8a3bca43",
   "THIRD_PARTY.md": "317937b6f2781e2ed87d469cb8b8747b046097198d968b241a0e456a52214cfd",
   "PUBLICATION.md": "f9c4396e835fc623a344e7ce298afe01652fc4efa0c4835dd11ea9dc10ec040f",
@@ -27,8 +27,9 @@
   "openrouter_provider.py": "c334e957b7a83f829fc055ae7bacfb9a247737f18b3687c65dfaf2ca0206cdf2",
   "recovery.py": "21033a572b25ab2446ca39b26c849a48546f0f6376a7f614bff389fcf1dae660",
   "launcher.py": "1715b42378b5934aa7bb6bb17d7e193bb1588e69917172165df0cb47d1cdab6a",
-  "desktop_helper.py": "5250eb07dc4c92ac6419e49a60e48f2bb77f6653041309d324924756df7bc63a",
-  "desktop_windows.py": "6c85045584ded8244997afbc025acabb8bd96c7eb47e81271aef9abccc71dcbf",
+  "insertion_log.py": "2a8393029983b6f982f14f146534e49af2fc63dec80620e53a6cc0d322864487",
+  "desktop_helper.py": "5d9048c4b8ad60d612fe9126e5fdca8dacd9e125edcad9d6a54aaf8fe482598a",
+  "desktop_windows.py": "4e1f5735fe05c0e1b9cc43f5c56fd9dbfd41c6445966992345984d399195c044",
   "native_app.py": "afc1697d1beb951f76ea8648a7d8dadee91d25237a1f7f3d9639fffe70cc9101",
   "model_guide.py": "842537a22ccbdbd56bc036d2b12b8767635a0363a3425b117d67f6b45fa8eda7",
   "shortcut_config.py": "615e1a3cefff9010e32814cf0e913b2313f6250c8bd21f1a63d92f52ae767d6d",
@@ -39,7 +40,7 @@
   "setup_models.py": "18f5b12451110f53bf8ba324b137f4dea08a7ea0d238c1b6febea018f21f0983",
   "model-lock.json": "3a09e3e57681ff9bf2e1be3b463f9af3660c26f1255fa063132280714533cca5",
   "requirements.lock.txt": "2ddf0755673bc3157f560376da94320dd2dcbfb1893913322a67d6d9c1465f0c",
-  "export_source.py": "090d1002efcec62ce7217c498ca70244e5f5185b474c1af543ade8c10458163d",
+  "export_source.py": "aaee30b0cd058423230e40c48b30338622982d2eaa8153e1db79d5e85af78aa3",
   "web/index.html": "ef7d4c8ec12d0a424aba7f7ed2abce429e85dbe80ab891bd98d9627019d3c819",
   "web/app.js": "d9a5d6089d8220782a5966a07ced58865d9215e2b2bd00b248ab8faa39acf6b9",
   "web/style.css": "f4ab28cdd9689d1caa18fabcd8014c6727b65dd4265948fc98f44c8974a5855e",
@@ -60,5 +61,6 @@
   "test_speed.py": "a7220c42d5d05c76f05020f8f9c7c0a4e61fa35561a10acd0da94f24d3b013e1",
   "test_recovery.py": "2fb01cf0044e56da788344bf3d23309d34b604993fc75387726d28defa2b7069",
   "test_launcher.py": "4a4d96ce289cc504c91c66e0df5fae6088f11ea37d3550421870f3de87140883",
+  "test_insertion_log.py": "caf553b76ceb638f97f69b5d7df32cf5f83a88dc40068aa09aab45f937b8f4e4",
   "test_recorder.cjs": "fea2aeaec1ddcde3cf502852e769e570898cf302c96e5bd13fe6e5b92b70a9bd"
 }
