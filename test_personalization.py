@@ -47,6 +47,19 @@ def test_dictionary_longest_match_and_no_cascade():
     assert dictionary_replace('super-base, soeper base en SUPER BASE gebruiken webhoek.')=='Supabase, Supabase en Supabase gebruiken webhook.'
     assert dictionary_replace('super-basement')=='super-basement'
 
+def test_spoken_participle_repair_preserves_meaning_and_unrelated_words():
+    from personalization import repair_spoken_words
+    assert repair_spoken_words('Ik heb al gebetaald voor het kaartje.')=='Ik heb al betaald voor het kaartje.'
+    assert repair_spoken_words('Heb je nog niet gebetaald?')=='Heb je nog niet betaald?'
+    assert repair_spoken_words('De gasten hebben gisteren allemaal gebetaald.')=='De gasten hebben gisteren allemaal betaald.'
+    assert repair_spoken_words('Ik heb geprobeerd en daarna gebeld.')=='Ik heb geprobeerd en daarna gebeld.'
+
+def test_spelling_discussion_and_quotes_are_not_repaired():
+    from personalization import repair_spoken_words
+    examples=['Het woord gebetaald is onjuist.', 'Ik heb "gebetaald" gezegd.', "Ik heb 'gebetaald' gezegd.",
+              'Ik heb gebetaald op het bord geschreven.', 'Ik heb `gebetaald` gebruikt.', 'Hier staat gebetaald.']
+    for example in examples:assert repair_spoken_words(example)==example
+
 def test_imported_hint_does_not_capitalize_common_words():
     identifier=storage.save_entry('dictionary',{'value':'Ook','aliases':['Ook']},source='wispr-hint')
     assert dictionary_replace('het is ook lokaal')=='het is ook lokaal'

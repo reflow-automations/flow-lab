@@ -31,6 +31,24 @@ def dictionary_replace(text):
         parts.extend([text[pos:start],item['value']]);pos=end
     return ''.join(parts)+text[pos:]
 
+def repair_spoken_words(text):
+    """Repair a known malformed participle only in a clear verb context.
+
+    Do not rewrite quoted words, code, or discussion about spelling itself.
+    This is deliberately not a fuzzy spellchecker or a general prefix stripper.
+    """
+    quoted=[match.span() for match in re.finditer(r'"[^"\n]*"|“[^”\n]*”|‘[^’\n]*’|(?<!\w)\x27[^\x27\n]+\x27(?!\w)|`[^`\n]*`',text)]
+    meta=re.compile(r'\b(?:woord|term|spelling|gespeld|getypt|geschreven|geciteerd|citeer|voorbeeldwoord)\b',re.I)
+    verb=re.compile(r'\b(?:heb|hebt|heeft|hebben|had|hadden|werd|werden|wordt|worden|is|zijn|was|waren)(?:[ \t]+\w+){0,5}[ \t]+$',re.I)
+    def replace(match):
+        if any(start<=match.start()<end for start,end in quoted):return match[0]
+        start=max([text.rfind(mark,0,match.start()) for mark in '.!?;\n'])+1
+        ends=[position for mark in '.!?;\n' if (position:=text.find(mark,match.end()))>=0]
+        end=min(ends) if ends else len(text)
+        if meta.search(text[start:end]) or not verb.search(text[start:match.start()]):return match[0]
+        return 'Betaald' if match[0][0].isupper() else 'betaald'
+    return re.sub(r'\bgebetaald\b',replace,text,flags=re.I)
+
 def protect_snippets(text):
     parts=[];protected={};pos=0
     prefix='FLOWLAB_'+secrets.token_hex(6).upper()+'_'

@@ -31,6 +31,10 @@ def test_digit_change_is_detected():
     assert not number_guard('Het is 1500 euro.','Het is 1.500 euro.')
     assert not number_guard('eerste punt test de koppeling','1. Test de koppeling.')
 
+def test_question_cannot_disappear_during_editing():
+    assert content_guard('Is de bestelling betaald?', 'De bestelling is betaald.')=='question_removed'
+    assert content_guard('Kun je nagaan wat de voorwaarden zijn?', 'Kun je nagaan wat de voorwaarden zijn?') is None
+
 def test_audio_duration_and_resampling():
     pcm=(np.sin(np.arange(48000)*.1)*1000).astype('<i2').tobytes()
     converted=read_wav(pcm_wav(pcm,48000))

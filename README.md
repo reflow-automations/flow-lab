@@ -231,6 +231,13 @@ desktophelper; de optionele browserrecorder heeft deze audiobewaring niet.
 
 ## Snippets, woordenboek en geschiedenis
 
+De opmaak van berichten en notities redigeert behoudend: geen samenvatting of
+vrijere formulering die vragen, voorwaarden of onzekerheid verandert. Een kleine
+contextregel herstelt de bekende verspreking `ik heb gebetaald` naar `ik heb betaald`.
+Geciteerde voorbeeldwoorden, spellingbesprekingen en de stijl **letterlijk** vallen
+buiten die regel. Dit is geen algemene spellingscontrole en geen garantie dat het
+taalmodel iedere verspreking of betekeniswijziging correct herkent.
+
 Gebruik de gelijknamige tabbladen in de eigen app. Daar kun je zoeken, selecteren,
 toevoegen, wijzigen, uitschakelen en kopiëren. Instellingen bevat daarnaast lokale
 of cloudopmaak, alinea-indeling en schrijfstijl. Het systeemvakmenu opent deze
