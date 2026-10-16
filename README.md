@@ -200,7 +200,8 @@ Er wordt dan niet opnieuw geplakt en niet onnodig op dezelfde controle gewacht.
 
 ## Een mislukte opname opnieuw verwerken
 
-Onder **Dicteren > Opname herstellen** staan mislukte desktopopnames. Kies een
+Onder **Dicteren > Opnames van de afgelopen 24 uur** staan desktopopnames, ook
+als de eerste verwerking geslaagd is. Kies een
 opname en klik **Opnieuw verwerken**. Er wordt geen nieuwe microfoonopname gestart.
 Het oorspronkelijke modelprofiel wordt gebruikt; een oorspronkelijk gekozen
 cloudformatter kan dus opnieuw tekst naar diezelfde provider sturen.
@@ -208,16 +209,22 @@ cloudformatter kan dus opnieuw tekst naar diezelfde provider sturen.
 Bij een netwerkfout tijdens het spreken blijft Flow Lab lokaal opnemen totdat je
 stopt. Bij stoppen wordt een herstelkopie versleuteld met Windows DPAPI opgeslagen
 onder `data/recovery/`. Deze is alleen onder hetzelfde Windows-account te lezen.
-De kopie verdwijnt nadat een eindresultaat bevestigd is. Bij een fout blijft ze
-beschikbaar, ook na herstart, tot herstel of **Opname verwijderen**. Maximaal drie
-openstaande herstelopnames; een vierde opname start pas als je ruimte vrijmaakt.
-Oudere mislukte opnames worden niet automatisch overschreven. Bij opslagproblemen
+De audio blijft 24 uur vanaf opname-einde beschikbaar, ook na succes of herstart.
+Daarna wordt ze bij actief gebruik (ongeveer elke minuut) of de volgende start
+automatisch opgeruimd. Een lopende herstelpoging wordt niet onderbroken.
+Er is maximaal 500 MB audio-opslag. Voor een nieuwe opname wordt ruimte voor
+de volle vijf minuten gereserveerd; bij volle opslag moet je eerst zelf iets
+verwijderen. Opnames binnen de bewaartermijn worden niet overschreven.
+Ongecomprimeerde audio is circa 2,9 MB per minuut of 14,4 MB voor vijf minuten,
+plus een kleine versleutelingsoverhead. Bij opslagproblemen
 blijft een kopie alleen in geheugen en waarschuwt de app om nog niet af te sluiten.
 
 Een herstelde tekst komt in de app en geschiedenis. Kies daarna zelf het gewenste
 tekstvak en druk Alt+Shift+Z, of kopieer de tekst. De oude cursorpositie wordt niet
 automatisch opnieuw gebruikt. Een herhaalde herstelpoging met hetzelfde opname-ID
-haalt een al bewaard resultaat op en maakt geen dubbele geschiedenisregel.
+haalt bij een verloren antwoord een al bewaard resultaat op en maakt geen dubbele
+geschiedenisregel. Kies je na een geslaagd resultaat bewust opnieuw verwerken,
+dan wordt de bewaarde audio echt opnieuw verwerkt en verschijnt een nieuw resultaat.
 Een expliciet geannuleerde opname wordt niet bewaard. Dit herstelt geen audio die
 door een oudere versie al verloren is gegaan. De herstelroute geldt voor de
 desktophelper; de optionele browserrecorder heeft deze audiobewaring niet.
@@ -279,8 +286,8 @@ Desktop start standaard lokaal. Browservoorkeuren staan apart en kunnen hybride/
 selecteren: controleer de keuzelijsten. Geen automatische cloudterugval bij offlinekeuze.
 
 Desktopaudio wordt tijdens opname in geheugen gehouden; bij stoppen ontstaat een
-versleutelde tijdelijke herstelkopie totdat het resultaat bevestigd is. Alleen
-mislukte desktopopnames blijven staan tot herstel of verwijderen. Browseraudio
+versleutelde herstelkopie die 24 uur blijft staan, ook na succesvolle verwerking.
+Handmatig verwijderen kan eerder; de audio-opslag is begrensd op 500 MB. Browseraudio
 blijft in geheugen. Voltooide tekst en metadata staan
 maximaal 30 dagen in `data/flow-lab.sqlite`. Opruimen gebeurt bij opstarten,
 lezen/opslaan en periodiek tijdens gebruik. De database is niet door Flow Lab

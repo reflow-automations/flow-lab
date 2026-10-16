@@ -166,7 +166,7 @@ class NativeApp:
         def explain_home(*_):self.home_model_hint.set(self.model_guide['desktop'][self.mode_choices[self.mode.get()]])
         self.mode.trace_add('write',explain_home);explain_home()
         ttk.Label(tab,textvariable=self.home_model_hint,wraplength=820).pack(anchor='w',pady=(8,20))
-        recovery=ttk.LabelFrame(tab,text='Opname herstellen',padding=8);recovery.pack(fill='x',pady=(0,12))
+        recovery=ttk.LabelFrame(tab,text='Opnames van de afgelopen 24 uur',padding=8);recovery.pack(fill='x',pady=(0,12))
         self.recovery_hint=tk.StringVar(value='Geen opname klaar voor herstel.')
         ttk.Label(recovery,textvariable=self.recovery_hint,wraplength=820).pack(anchor='w')
         actions=ttk.Frame(recovery);actions.pack(fill='x',pady=(6,0))
@@ -203,7 +203,7 @@ class NativeApp:
         if self.recovery_choice.get() not in self.recovery_choices:self.recovery_choice.set(next(iter(self.recovery_choices),''))
         enabled=bool(entries) and getattr(self.app,'state','idle')=='idle'
         self.retry_button.configure(state='normal' if enabled else 'disabled');self.discard_button.configure(state='normal' if enabled else 'disabled')
-        self.recovery_hint.set('Versleuteld op deze pc tot herstel of verwijderen. Opnieuw verwerken gebruikt de oorspronkelijke modelkeuze.' if entries else 'Geen opname klaar voor herstel. Mislukte opnames verschijnen hier, ook na herstart.')
+        self.recovery_hint.set('Audio blijft 24 uur versleuteld bewaard, ook na succes. Maximaal 500 MB. Opnieuw verwerken gebruikt de oorspronkelijke modelkeuze.' if entries else 'Nog geen bewaarde opname. Nieuwe desktopopnames blijven hier 24 uur beschikbaar, ook na herstart.')
         if any(not item.get('persistent',True) for item in entries):self.recovery_hint.set('Let op: herstelkopie alleen in geheugen. Sluit Flow Lab niet voordat je deze hebt hersteld.')
         self.insertion_message.set(getattr(self.app,'last_insertion_message',''))
         self.shortcut_text.set(shortcut_label(self.app.config['hotkey'])+'  |  Dicteren')

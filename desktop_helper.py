@@ -22,7 +22,7 @@ from shortcut_config import shortcut,shortcut_label,KEYS,MODIFIERS,LABELS
 from dictation_gesture import DictationGesture
 from compact_overlay import CompactOverlay
 from limits import MAX_SECONDS,SESSION_TIMEOUT_SECONDS,AudioBudget
-from recovery import RecoveryStore,MAX_PENDING,wav_bytes
+from recovery import RecoveryStore,wav_bytes
 
 ROOT = Path(__file__).resolve().parent
 STATE = ROOT / 'data/desktop-status.json'
@@ -192,6 +192,7 @@ class Desktop:
         self.root_path=ROOT;self.service_url=URL;self.control_window=None
         self.config = settings()
         self.recovery_store=RecoveryStore(ROOT/'data/recovery')
+        self.recovery_store.prune()
         self.test = test
         self.current = None
         self.last_insertion_message='Dit is een kopie van je laatste tekst. De plaatsingsstatus verschijnt na het dicteren.'
@@ -246,6 +247,11 @@ class Desktop:
         if test: self.make_scratch()
         else: self.prewarm()
         self.root.after(20, self.poll)
+        self.root.after(60000,self.cleanup_audio)
+
+    def cleanup_audio(self):
+        try:self.recovery_store.prune()
+        finally:self.root.after(60000,self.cleanup_audio)
 
     def prewarm(self):
         """Load the chosen local models now, so the first dictation is not the slow one."""
@@ -335,9 +341,9 @@ class Desktop:
 
     def start(self):
         if self.current or self.state!='idle': return
-        if len(self.recovery_store.ids())>=MAX_PENDING:
+        if not self.recovery_store.can_record():
             self.gesture.reset()
-            self.remember_status('Er staan drie opnames klaar voor herstel. Verwerk of verwijder er eerst een in Dicteren.')
+            self.remember_status('Audio-opslag is vol (500 MB). Verwijder een bewaarde opname in Dicteren.')
             self.open_app('home');return
         self.stop_requested=False
         self.ident += 1
@@ -406,7 +412,9 @@ class Desktop:
     def cancel(self):
         self.gesture.reset()
         self.ident += 1
-        if self.current: self.current.cancel.set(); self.current.stop.set()
+        if self.current:
+            self.current.cancel.set(); self.current.stop.set()
+            if getattr(self.current,'recovery_id',None):self.recovery_store.active.discard(self.current.recovery_id)
         self.current = None; self.state = 'idle'
         self.hotkeys.command('escape', False)
         self.display('Geannuleerd')
@@ -416,25 +424,33 @@ class Desktop:
         if self.state!='idle':return
         self.ident+=1;ident=self.ident
         self.state='processing';self.hotkeys.command('escape',True)
-        self.current=SimpleNamespace(cancel=threading.Event(),stop=threading.Event())
+        self.current=SimpleNamespace(cancel=threading.Event(),stop=threading.Event(),recovery_id=recording_id)
+        session=self.current
         self.remember_status('Opgeslagen opname opnieuw verwerken. De microfoon blijft uit.')
         def run():
             import httpx
+            delivered=False
+            self.recovery_store.active.add(recording_id)
             try:
                 metadata,pcm=self.recovery_store.load(recording_id)
+                request_id=self.recovery_store.retry_id(recording_id)
                 if metadata.get('partial'):self.events.put(('recovery_note',ident,'Dit is een gedeeltelijke opname na een microfoonfout.'))
-                response=httpx.post(URL+'/api/clip',params={**metadata['config'],'recording_id':recording_id},
+                response=httpx.post(URL+'/api/clip',params={**metadata['config'],'recording_id':request_id},
                                     content=wav_bytes(pcm),headers={'Origin':URL,'Content-Type':'audio/wav'},
                                     timeout=SESSION_TIMEOUT_SECONDS,trust_env=False)
                 if response.status_code==409:raise RuntimeError('Er wordt nog verwerkt. De opname blijft bewaard; probeer later opnieuw.')
                 if not response.is_success:raise RuntimeError('Opnieuw verwerken is mislukt. De opname blijft bewaard.')
                 result=response.json()
-                if not isinstance(result.get('text'),str) or not isinstance(result.get('raw'),str) or (result['raw'].strip() and not result['text'].strip()) or (result['text'] and result.get('history_id')!=recording_id):
+                if not isinstance(result.get('text'),str) or not isinstance(result.get('raw'),str) or (result['raw'].strip() and not result['text'].strip()) or (result['text'] and result.get('history_id')!=request_id):
                     raise RuntimeError('Geen bevestigd herstelresultaat ontvangen. De opname blijft bewaard.')
                 result['recovery_partial']=bool(metadata.get('partial'))
+                if session.cancel.is_set():return
                 self.events.put(('recovered',ident,recording_id,result))
+                delivered=True
             except Exception as exc:
                 self.events.put(('recovery_error',ident,str(exc) if isinstance(exc,RuntimeError) else 'Verbinding met Flow Lab mislukt. De opname blijft bewaard.'))
+            finally:
+                if not delivered:self.recovery_store.active.discard(recording_id)
         threading.Thread(target=run,daemon=True).start()
 
     def hide_later(self,delay_ms=3500):
@@ -611,7 +627,8 @@ class Desktop:
                 if kind == 'recovered':
                     recording_id,result=args
                     self.last_text=result.get('text','')
-                    self.recovery_store.discard(recording_id)
+                    self.recovery_store.mark_completed(recording_id)
+                    self.recovery_store.active.discard(recording_id)
                     self.current=None;self.state='idle';self.hotkeys.command('escape',False)
                     message='Herstel klaar. Kies je tekstvak en druk Alt+Shift+Z, of kopieer hieronder.' if self.last_text else 'Geen hoorbare spraak gevonden in deze opname.'
                     if result.get('recovery_partial'):message='Gedeeltelijke opname hersteld. Controleer of je laatste woorden erbij staan. '+message
@@ -648,7 +665,7 @@ class Desktop:
                     if self.state=='recording':self.display('Verbinding weg. Ik blijf lokaal opnemen tot je stopt.')
                 elif kind == 'processing': self.state='processing'; self.display('Tekst opmaken...')
                 elif kind == 'result':
-                    if getattr(self.current,'recording_id',None):self.recovery_store.discard(self.current.recording_id)
+                    if getattr(self.current,'recording_id',None):self.recovery_store.mark_completed(self.current.recording_id)
                     self.last_text=args[0].get('text',''); self.state='inserting'; self.display('Tekst plaatsen...')
                     threading.Thread(target=self.insert,args=(self.current,args[0]),daemon=True).start()
                 elif kind == 'inserted':

@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 import app as routes
 import storage
-from recovery import RecoveryStore,MAX_PENDING,wav_bytes
+from recovery import RecoveryStore,RETENTION_SECONDS,wav_bytes
 from engines import APP_PORT
 
 def config():return dict(engine='parakeet',formatter='local',style='bericht',paragraphs='normaal')
@@ -24,13 +24,43 @@ def test_encrypted_audio_survives_restart_and_preserves_exact_samples(tmp_path):
     store.discard(key)
     assert RecoveryStore(tmp_path).entries()==[]
 
-def test_recovery_never_evicts_an_older_failed_recording(tmp_path):
+def test_recovery_capacity_never_evicts_unexpired_audio(monkeypatch,tmp_path):
+    import recovery
     store=RecoveryStore(tmp_path)
-    keys=[str(uuid.uuid4()) for _ in range(MAX_PENDING)]
-    for key in keys:store.save(key,b'\0\1'*20,config())
+    key=str(uuid.uuid4());store.save(key,b'\0\1'*20,config())
+    monkeypatch.setattr(recovery,'MAX_STORAGE_BYTES',store.used_bytes()+65536+39)
     with pytest.raises(RuntimeError):store.save(str(uuid.uuid4()),b'\0\1'*20,config())
-    assert set(store.ids())==set(keys)
+    assert store.ids()==[key]
     with pytest.raises(ValueError):store.discard('../outside')
+
+def test_successful_audio_remains_for_24_hours_and_can_really_run_again(tmp_path):
+    store=RecoveryStore(tmp_path);key=str(uuid.uuid4());pcm=b'\0\1'*20
+    store.save(key,pcm,config());original_time=store.metadata(key)['created_at']
+    assert store.retry_id(key)==key
+    store.mark_completed(key)
+    assert RecoveryStore(tmp_path).load(key)[1]==pcm
+    retry=store.retry_id(key)
+    assert retry!=key and store.retry_id(key)==retry
+    store.mark_completed(key)
+    assert store.metadata(key)['created_at']==original_time
+    assert store.retry_id(key)!=retry
+    store.prune(now=original_time+RETENTION_SECONDS-1)
+    assert key in store.ids()
+    store.prune(now=original_time+RETENTION_SECONDS)
+    assert store.ids()==[] and not list(tmp_path.glob(key+'.*'))
+
+def test_expiry_protects_active_retry_and_never_removes_new_recording(tmp_path):
+    store=RecoveryStore(tmp_path);key=str(uuid.uuid4());store.save(key,b'\0\1'*20,config())
+    created=store.metadata(key)['created_at'];store.active.add(key)
+    store.prune(now=created+RETENTION_SECONDS+1)
+    assert key in store.ids()
+    store.active.discard(key);store.prune(now=created+RETENTION_SECONDS+1)
+    assert key not in store.ids()
+
+def test_metadata_listing_does_not_decrypt_all_audio(monkeypatch,tmp_path):
+    store=RecoveryStore(tmp_path);key=str(uuid.uuid4());store.save(key,b'\0\1'*20,config())
+    monkeypatch.setattr(store,'load',lambda *_:(_ for _ in ()).throw(AssertionError('Listing should use small metadata index')))
+    assert store.entries()[0]['id']==key
 
 def test_disk_failure_keeps_in_memory_recovery(monkeypatch,tmp_path):
     import recovery
