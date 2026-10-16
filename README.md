@@ -241,6 +241,11 @@ Geciteerde voorbeeldwoorden, spellingbesprekingen en de stijl **letterlijk** val
 buiten die regel. Dit is geen algemene spellingscontrole en geen garantie dat het
 taalmodel iedere verspreking of betekeniswijziging correct herkent.
 
+Engelse woorden en uitdrukkingen in Nederlandse spraak moeten in het Engels
+blijven, ook gewone tussenzinnen zoals `let's go`, `no worries` en `makes sense`.
+De opmaakinstructie verbiedt ook gedeeltelijke vertaling; hoofdletters en
+interpunctie mogen wel worden verzorgd.
+
 Gebruik de gelijknamige tabbladen in de eigen app. Daar kun je zoeken, selecteren,
 toevoegen, wijzigen, uitschakelen en kopiëren. Instellingen bevat daarnaast lokale
 of cloudopmaak, alinea-indeling en schrijfstijl. Het systeemvakmenu opent deze
