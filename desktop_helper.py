@@ -366,8 +366,14 @@ class Desktop:
         self.hotkeys.command('escape', True)
         self.display('Cursor controleren...')
         def capture():
-            try: target = self.uia.submit(w.capture_target, hwnd).result(timeout=1.2)
-            except Exception: target = w.Target(hwnd, reason='Tekstvak niet controleerbaar: straks kopiëren')
+            details={};future=None
+            try:
+                future=self.uia.submit(w.capture_with_focus_retry,hwnd,details);target=future.result(timeout=1.2)
+            except Exception as exc:
+                if future is not None:future.cancel()
+                details=dict(details);details['capture_error']=type(exc).__name__
+                reason='Cursorcontrole duurde te lang; je tekst blijft bewaard.' if isinstance(exc,TimeoutError) else 'Tekstvak niet controleerbaar: straks kopiëren'
+                target=w.Target(hwnd,reason=reason,details=details)
             self.events.put(('captured', ident, target))
         threading.Thread(target=capture, daemon=True).start()
 
@@ -415,7 +421,7 @@ class Desktop:
                 text=latest_text()
                 if not text:
                     self.events.put(('error',ident,'Nog geen bewaarde transcriptie om te plakken')); return
-                target=self.uia.submit(w.capture_target,hwnd).result(timeout=1.2)
+                target=self.uia.submit(w.capture_with_focus_retry,hwnd).result(timeout=1.2)
                 self.events.put(('replay_captured',ident,target,text))
             except Exception:
                 self.events.put(('error',ident,'Laatste tekst niet beschikbaar of tekstvak niet controleerbaar'))

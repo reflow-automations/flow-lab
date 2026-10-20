@@ -87,3 +87,62 @@ def test_phone_library_export_matches_android_format():
     out=phone_library(data)
     assert out=={'dictionary':[{'name':'Supabase','value':'Supabase','aliases':['superbase'],'enabled':True,'source':'user'}],
                  'snippets':[{'name':'Adres','value':'Straat 1\n\nStad','aliases':['mijn adres'],'enabled':False,'source':'user'}]}
+
+def test_openrouter_key_shortlist_and_saved_model_probe(monkeypatch,tk_window):
+    import app as app_module
+    import openrouter_provider as provider
+    from openrouter_guide import SUGGESTIONS
+    first,second=list(SUGGESTIONS)[:2]
+    available=[{'id':first,'name':'First model'},{'id':second,'name':'Second model'}]
+    available += [{'id':f'example/other-{i}:free','name':f'Other {i}'} for i in range(6)]
+    storage.set_setting('openrouter_model',first)
+    key_saves=[];probes=[];requests=[]
+    monkeypatch.setattr(provider,'status',lambda:{'configured':True,'key_present':True,'model':storage.setting('openrouter_model',''),'data_collection':'deny'})
+    monkeypatch.setattr(provider,'save_key',lambda key:key_saves.append(key))
+    async def catalogue(*_,**__):return available
+    async def fake_format(text,formatter):
+        probes.append((text,formatter,storage.setting('openrouter_model','')))
+        return {'text':'Hallo Alex. De voorbeeldplanning is klaar.','ms':750,'warning':None}
+    monkeypatch.setattr(provider,'catalogue',catalogue)
+    monkeypatch.setattr(app_module,'format_text',fake_format)
+    client=TestClient(api);root=tk_window
+    fake=NS(root=root,root_path=Path(__file__).resolve().parent,service_url=f'http://127.0.0.1:{APP_PORT}',events=queue.Queue(),config={'hotkey':'ctrl-win','formatter':'local'},replay_key='alt-shift-z',write_state=lambda:None,shortcut_settings=lambda:None,quit_all=lambda:None)
+    def request(self,path,callback,method='GET',data=None):
+        requests.append(path)
+        response=client.request(method,path,json=data,headers={'Origin':fake.service_url})
+        callback(response.json() if response.status_code<400 else None,None if response.status_code<400 else 'Fictieve providerfout')
+    monkeypatch.setattr(NativeApp,'request',request)
+    window=NativeApp(fake)
+    try:
+        window.show('openrouter');window.root.withdraw()
+        assert 'Sleutel toegevoegd' in window.router_key_notice.get()
+        assert str(window.router_key_input['state'])=='disabled'
+        assert str(window.router_key_save['state'])=='disabled'
+        window.router_key.set('onbedoelde tweede waarde');window.save_router_key()
+        assert key_saves==[]
+        window.edit_router_key();window.router_key.set('sk-or-'+('x'*40));window.save_router_key()
+        assert len(key_saves)==1 and window.router_key.get()==''
+        assert str(window.router_key_save['state'])=='disabled'
+        assert key_saves[0] not in window.router_key_notice.get()+window.router_status.get()
+        window.fetch_router_models()
+        assert len(window.router_combo['values'])==2
+        label=next(k for k,v in window.router_choice_map.items() if v['id']==second)
+        window.router_choice.set(label);window.router_choice_selected()
+        assert str(window.router_test_button['state'])=='disabled'
+        window.test_router_model();assert probes==[]
+        assert storage.setting('openrouter_model','')==first
+        window.save_router_model();window.test_router_model()
+        assert len(probes)==1 and probes[0][1:] == ('openrouter-free',second)
+        assert 'hallo Alex' in probes[0][0]  # The fixed API example, never microphone/history input.
+        assert second in window.router_result.get('1.0','end-1c')
+        assert fake.config['formatter']=='local' and fake.events.empty()
+        window.router_all.set(True);window.populate_router_choices()
+        assert len(window.router_combo['values'])==8 and window.router_model.get()==second
+        window.activate_router();assert fake.events.get()[1]['formatter']=='openrouter-free'
+        async def fail_format(*_):raise RuntimeError('Fictieve providerfout')
+        monkeypatch.setattr(app_module,'format_text',fail_format)
+        window.test_router_model()
+        assert 'Sleutel toegevoegd' in window.router_key_notice.get()
+        assert str(window.router_key_save['state'])=='disabled'
+        assert 'Fictieve providerfout' in window.router_status.get()
+    finally:window.root.destroy()

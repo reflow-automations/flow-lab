@@ -11,6 +11,7 @@ QUIET_SECONDS=1.5
 WORD=re.compile(r'[^\W_]+(?:[\x27’\-][^\W_]+)*',re.UNICODE)
 QUOTES=re.compile(r'"[^"\n]*"|“[^”\n]*”|‘[^’\n]*’|(?<!\w)\x27[^\x27\n]+\x27(?!\w)|`[^`\n]*`')
 COMMON=set('ik jij je hij zij ze wij we jullie u het de een en of maar want dus dat dit die deze is was zijn waren heb heeft hebben kan kunnen wil willen moet moeten niet wel geen misschien zeker morgen gisteren vandaag maandag dinsdag woensdag donderdag vrijdag zaterdag zondag ja nee betaald betalen werkt werken dag tijd naam woord term you me my your he she we they it the a an and or but because this that is was are were have has can could would should will not yes no maybe tomorrow today yesterday higher lower right wrong'.split())
+COMMON.update('mijn jouw uw haar hun ons onze iedere elk welke your our their its'.split())
 
 def basis_for_placement(actual,dictated,prefix,suffix):
     actual=actual.replace('\r\n','\n').replace('\r','\n').rstrip('\n')
@@ -35,6 +36,33 @@ def safe_phrase(value):
     if any(len(word)>32 or len(word)>=16 and all(c in '0123456789abcdefABCDEF' for c in word) for word in value.split()):return False
     return 2<=len(value)<=80 and bool(re.fullmatch(r'[^\W_]+(?:[\x27’\- ][^\W_]+){0,2}',value,re.UNICODE)) and any(c.isalpha() for c in value) and not value.isnumeric()
 
+def name_span(before,after,left,right,i,j,k,l,catalog):
+    """Keep a corrected word scoped to a name; never turn a name part into a global alias."""
+    options=[]
+    for prefix in range(min(i,k,2)+1):
+        for suffix in range(min(len(left)-j,len(right)-l,2)+1):
+            if not prefix+suffix or l-k+prefix+suffix>3:continue
+            a,b=i-prefix,j+suffix;c,d=k-prefix,l+suffix
+            if [m[0] for m in left[a:i]]!=[m[0] for m in right[c:k]]:continue
+            if [m[0] for m in left[j:b]]!=[m[0] for m in right[l:d]]:continue
+            old=before[left[a].start():left[b-1].end()];new=after[right[c].start():right[d-1].end()]
+            if not safe_phrase(old) or not safe_phrase(new):continue
+            known=next((row for row in catalog if storage.alias_key(row['value'])==storage.alias_key(new)),None)
+            if known:options.append((d-c,a,b,c,d))
+    if options:
+        _,a,b,c,d=max(options)
+        return a,b,c,d
+    # A lowercase second name part is still a useful proposal when its unchanged
+    # first part looks like a name. Ordinary determiners are excluded.
+    if j-i==l-k==1 and i>0 and k>0 and right[k][0][0].islower():
+        prefix=right[k-1][0]
+        if (left[i-1][0]==prefix and prefix[0].isupper() and len(prefix)>=3
+                and storage.alias_key(prefix) not in COMMON
+                and re.fullmatch(r'[ \t]+',before[left[i-1].end():left[i].start()])
+                and re.fullmatch(r'[ \t]+',after[right[k-1].end():right[k].start()])):
+            return i-1,j,k-1,l
+    return i,j,k,l
+
 def candidates(before,after,catalog):
     """Only small replacements in the owned passage; additions alone never teach."""
     if len(before)>24000 or len(after)>26000 or not after.strip():return []
@@ -55,6 +83,13 @@ def candidates(before,after,catalog):
                 if any(row['enabled'] and storage.alias_key(row['value'])==storage.alias_key(proposed) for row in catalog):
                     l=k+length;break
         if tag!='replace' or not 1<=j-i<=2 or not 1<=l-k<=2:continue
+        changed_wrong=before[left[i].start():left[j-1].end()]
+        changed_right=after[right[k].start():right[l-1].end()]
+        if not safe_phrase(changed_wrong) or not safe_phrase(changed_right):continue
+        if storage.alias_key(changed_wrong) in COMMON or storage.alias_key(changed_right) in COMMON:continue
+        a,b,c,d=name_span(before,after,left,right,i,j,k,l,catalog)
+        contextual=(a,b,c,d)!=(i,j,k,l)
+        i,j,k,l=a,b,c,d
         start,end=left[i].start(),left[j-1].end();new_start,new_end=right[k].start(),right[l-1].end()
         def unsafe_context(text,a,b):
             first=max(text.rfind(' ',0,a),text.rfind('\n',0,a))+1
@@ -70,8 +105,9 @@ def candidates(before,after,catalog):
         if any(c.isdigit() for c in wrong+correct):continue
         known=next((row for row in catalog if storage.alias_key(row['value'])==rk),None)
         if known and (not known['enabled'] or known.get('source')=='wispr-hint'):continue
-        ratio=SequenceMatcher(None,wk.replace(' ',''),rk.replace(' ','')).ratio()
-        ambiguous=wrong.isupper() and len(wrong)<=5 or len(wk)<4 or ratio<.55
+        changed_wk=storage.alias_key(changed_wrong);changed_rk=storage.alias_key(changed_right)
+        ratio=SequenceMatcher(None,changed_wk.replace(' ',''),changed_rk.replace(' ','')).ratio()
+        ambiguous=changed_wrong.isupper() and len(changed_wrong)<=5 or len(changed_wk)<4 or ratio<.55
         if known:mode='confirm' if ambiguous else 'auto'
         elif correct[0].isupper() and len(rk)>=4:
             preceding=after[:new_start].rstrip()
@@ -79,7 +115,7 @@ def candidates(before,after,catalog):
             mode='confirm' if ambiguous or sentence_initial else 'repeat'
         else:continue
         results.append({'wrong':wrong,'right':known['value'] if known else correct,'mode':mode,'known_id':known['id'] if known else None,
-                        'reason':'Dubbelzinnige of korte variant' if ambiguous else 'Bekende schrijfwijze' if known else 'Nieuwe naam of term'})
+                        'reason':'Dubbelzinnige of korte variant' if ambiguous else 'Bekende schrijfwijze' if known else 'Nieuwe naam met woordcontext' if contextual else 'Nieuwe naam of term'})
     return results
 
 class Repository:

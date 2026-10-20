@@ -145,7 +145,9 @@ class UiaWorker:
         import comtypes,comtypes.client
         comtypes.CoInitializeEx(0);comtypes.client.GetModule('UIAutomationCore.dll')
         from comtypes.gen import UIAutomationClient as U
-        uia=comtypes.client.CreateObject(U.CUIAutomation,interface=U.IUIAutomation)
+        uia=comtypes.client.CreateObject(U.CUIAutomation8,interface=U.IUIAutomation2)
+        uia.AutoSetFocus=False
+        uia.ConnectionTimeout=300;uia.TransactionTimeout=300
         while True:
             fn,args,future=self.tasks.get()
             if future.cancelled():continue
@@ -220,40 +222,130 @@ def belongs_to_window(uia,element,hwnd,details):
     details['ancestry_result']='depth_limit'
     return False
 
-def capture_target(uia,U,hwnd):
-    t=Target(hwnd)
-    if foreground()!=hwnd:t.reason='Het actieve venster is gewijzigd';return t
+def focused_writable_editor(e,U):
+    """No field text: verify keyboard focus and an editable role or writable text pattern."""
+    if not e.CurrentHasKeyboardFocus or not e.CurrentIsEnabled:return False
+    if e.CurrentIsPassword or e.CurrentControlType==U.UIA_EditControlTypeId:return True
+    value=pattern(e,U,'UIA_ValuePatternId','IUIAutomationValuePattern')
+    if value and not value.CurrentIsReadOnly:return True
+    text=pattern(e,U,'UIA_TextPatternId','IUIAutomationTextPattern')
+    if text:
+        readonly=text.DocumentRange.GetAttributeValue(U.UIA_IsReadOnlyAttributeId)
+        return readonly is False or type(readonly) is int and readonly==0
+    return False
+
+def focused_editor(uia,U,hwnd,details=None):
+    """Resolve hosted editors by Windows roles and focus, never by app name or location."""
+    details={} if details is None else details
+    details['focus_stage']='get_focused'
     e=uia.GetFocusedElement()
+    if not e:return e
+    details['focus_resolution']='focused_element'
+    # Custom, Group, Document, Window and Pane can host an embedded editor.
+    if getattr(e,'CurrentControlType',None) not in {50025,50026,50030,50032,50033}:return e
+    if e.CurrentIsPassword or 'terminal' in (e.CurrentName or '').casefold():return e
+    if getattr(e,'CurrentHasKeyboardFocus',False) and focused_writable_editor(e,U):return e
+    if foreground()!=hwnd or not belongs_to_window(uia,e,hwnd,{}):return e
+    details['focus_host_class']=e.CurrentClassName
+    editable=uia.CreateOrCondition(uia.CreatePropertyCondition(U.UIA_ControlTypePropertyId,U.UIA_EditControlTypeId),
+        uia.CreateOrCondition(uia.CreatePropertyCondition(U.UIA_IsValuePatternAvailablePropertyId,True),
+                              uia.CreatePropertyCondition(U.UIA_IsTextPatternAvailablePropertyId,True)))
+    condition=uia.CreateAndCondition(uia.CreatePropertyCondition(U.UIA_HasKeyboardFocusPropertyId,True),editable)
+    details['focus_stage']='host_find_first'
+    first=uia.ElementFromHandle(hwnd).FindFirst(U.TreeScope_Descendants,condition)
+    if not first:
+        details['focus_lookup_result']='no_focused_editor'
+        return e
+    if not focused_writable_editor(first,U):return e
+    parent=uia.RawViewWalker.GetParentElement(first)
+    if not parent:return e
+    # A full descendant enumeration can walk the complete chat history and exceed
+    # the capture deadline. Check only this focused editor's immediate siblings.
+    details['focus_stage']='host_focused_siblings'
+    # WinUI fragment parents can return no children through FindAll even while
+    # RawViewWalker exposes the actual focused edit. Walk only direct siblings.
+    candidates={};candidate=uia.RawViewWalker.GetFirstChildElement(parent);seen=0
+    while candidate and seen<16:
+        seen+=1
+        if focused_writable_editor(candidate,U) and belongs_to_window(uia,candidate,hwnd,{}):
+            runtime=tuple(candidate.GetRuntimeId())
+            if runtime:candidates[runtime]=candidate
+        candidate=uia.RawViewWalker.GetNextSiblingElement(candidate)
+    details['focused_siblings_examined']=seen;details['focused_edit_candidates']=len(candidates)
+    if candidate:return e
+    if len(candidates)==1 and tuple(first.GetRuntimeId()) in candidates and foreground()==hwnd:
+        details['focus_resolution']='hosted_focused_edit'
+        details['focus_stage']='resolved'
+        return next(iter(candidates.values()))
+    return e
+
+def capture_with_focus_retry(uia,U,hwnd,details=None):
+    """Briefly tolerate an editor's focus publication lag before recording starts."""
+    details={} if details is None else details
+    attempts=[]
+    for attempt,delay in enumerate((0,.08,.12),1):
+        if delay:
+            if foreground()!=hwnd:break
+            time.sleep(delay)
+            if foreground()!=hwnd:break
+        details.clear();details.update(capture_attempts=attempt,capture_attempt_stages=list(attempts))
+        target=capture_target(uia,U,hwnd,details)
+        current=dict(details)
+        attempts.append({key:current[key] for key in ('focus_stage','focus_lookup_result','capture_stage') if key in current})
+        details['capture_attempt_stages']=list(attempts)
+        target.details=details
+        # Do not retry a known field, password, readonly field, ambiguity, provider
+        # error or changed selection. Only the absence of a focused child qualifies.
+        if target.editable or target.password or current.get('focus_lookup_result')!='no_focused_editor':return target
+    if foreground()!=hwnd:
+        return Target(hwnd,reason='Het actieve venster is gewijzigd',details=details)
+    return target
+
+
+def capture_target(uia,U,hwnd,details=None):
+    t=Target(hwnd)
+    if details is not None:t.details=details
+    t.details['capture_stage']='focus'
+    if foreground()!=hwnd:t.reason='Het actieve venster is gewijzigd';return t
+    e=focused_editor(uia,U,hwnd,t.details)
     if not e:return t
-    t.details={'control_type':e.CurrentControlType,'class_name':e.CurrentClassName or '', 'enabled':bool(e.CurrentIsEnabled)}
+    t.details.update(control_type=e.CurrentControlType,class_name=e.CurrentClassName or '',enabled=bool(e.CurrentIsEnabled))
+    t.details['capture_stage']='ancestry'
     # Hosted browser controls may use another PID. Prove ancestry, not just PID equality.
     if not belongs_to_window(uia,e,hwnd,t.details):
         t.reason='Kan het invoerveld niet aan het actieve venster koppelen. Tekst blijft bewaard.';return t
     if e.CurrentIsPassword:t.password=True;t.reason='Wachtwoordveld: opname niet gestart';return t
     name=(e.CurrentName or '').casefold()
     if 'terminal' in name:t.reason='Terminal: tekst straks zelf kopiëren';return t
+    t.details['capture_stage']='patterns'
     tp=pattern(e,U,'UIA_TextPatternId','IUIAutomationTextPattern');vp=pattern(e,U,'UIA_ValuePatternId','IUIAutomationValuePattern')
     t.details.update(text_pattern=bool(tp),value_pattern=bool(vp))
     writable=bool(vp and not vp.CurrentIsReadOnly)
+    if vp and vp.CurrentIsReadOnly:
+        t.reason='Dit tekstvak is alleen-lezen.';return t
     if tp:
         readonly=tp.DocumentRange.GetAttributeValue(U.UIA_IsReadOnlyAttributeId)
-        writable=writable or readonly is False
+        if readonly is True or type(readonly) is int and readonly==1:
+            t.reason='Dit tekstvak is alleen-lezen.';return t
+        writable=writable or readonly is False or type(readonly) is int and readonly==0
     if not e.CurrentIsEnabled or not (writable or e.CurrentControlType==U.UIA_EditControlTypeId):
         t.reason='Klik eerst in het tekstvak waar je wilt dicteren.';return t
     if not tp:
         native=e.CurrentNativeWindowHandle
         if not native or (e.CurrentClassName or '').casefold()!='edit' or not vp:
             t.reason='Dit tekstvak geeft de cursor nog niet door aan Windows.';return t
+        t.details['capture_stage']='native_selection'
         start,end=edit_selection(native);text=vp.CurrentValue
         t.native_edit=native;t.native_selection=(start,end)
         t.prefix=norm(utf16_slice(text,0,start));t.suffix=norm(utf16_slice(text,end));t.can_verify=True
         t.editable=True;t.reason='Cursor vastgelegd';t.element=e;t.runtime=tuple(e.GetRuntimeId());t.before_hash=digest(text)
-        return t
+        t.details['capture_stage']='ready';return t
+    t.details['capture_stage']='selection'
     selections=tp.GetSelection()
     t.details['selection_count']=selections.Length
     if selections.Length!=1:
         t.reason='De cursor of selectie in dit tekstvak is niet uitleesbaar.';return t
-    selected=selections.GetElement(0)
+    selected=selections.GetElement(0);t.details['capture_stage']='surrounding_text'
     before=tp.DocumentRange.Clone();before.MoveEndpointByRange(1,selected,0)
     after=tp.DocumentRange.Clone();after.MoveEndpointByRange(0,selected,1)
     t.prefix=norm(before.GetText(20001));t.suffix=norm(after.GetText(20001));t.can_verify=len(t.prefix)<=20000 and len(t.suffix)<=20000
@@ -263,13 +355,13 @@ def capture_target(uia,U,hwnd):
     if vp and vp.CurrentValue=='':t.prefix='';t.suffix='';t.can_verify=True
     t.details.update(before_length=len(text),prefix_length=len(t.prefix),suffix_length=len(t.suffix))
     t.editable=True;t.reason='Cursor vastgelegd';t.element=e;t.runtime=tuple(e.GetRuntimeId());t.selected=selected.Clone();t.before_hash=digest(text)
-    return t
+    t.details['capture_stage']='ready';return t
 
 def same_target(uia,U,t):
     if not t.editable:return False,t.reason
     if foreground()!=t.hwnd:return False,'Je bent naar een ander venster gegaan'
     try:
-        e=uia.GetFocusedElement()
+        e=focused_editor(uia,U,t.hwnd)
         if not e or e.CurrentIsPassword or tuple(e.GetRuntimeId())!=t.runtime:return False,'Je bent naar een ander tekstvak gegaan'
         if digest(field_text(e,U))!=t.before_hash:return False,'De tekst is intussen veranderd'
         if t.native_edit:
@@ -291,7 +383,7 @@ def verify_target(uia,U,t,text):
         # Rich editors can replace their accessibility object after a paste.
         # Resolve the same runtime ID again; never verify an unrelated field.
         e=t.element
-        focused=uia.GetFocusedElement()
+        focused=focused_editor(uia,U,t.hwnd)
         if focused and tuple(focused.GetRuntimeId())==t.runtime:e=focused
         actual=norm(field_text(e,U)).rstrip('\n')
         if getattr(t,'learning_requested',False):
@@ -322,7 +414,7 @@ def verify_target(uia,U,t,text):
 def learning_snapshot(uia,U,hwnd,runtime):
     """Read only the original focused edit. Never inspect a newly focused field."""
     if foreground()!=hwnd:return None
-    element=uia.GetFocusedElement()
+    element=focused_editor(uia,U,hwnd)
     if not element or tuple(element.GetRuntimeId())!=tuple(runtime):return None
     if element.CurrentIsPassword or not element.CurrentIsEnabled:return None
     value=pattern(element,U,'UIA_ValuePatternId','IUIAutomationValuePattern')

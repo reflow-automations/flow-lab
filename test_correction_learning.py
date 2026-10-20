@@ -37,6 +37,42 @@ def test_new_name_needs_two_independent_dictations():
     repo.observe('two',items)
     assert repo.list()[0]['state']=='learned' and repo.list()[0]['observations']==2
 
+def test_lowercase_name_part_is_learned_with_unchanged_name_context():
+    repo=Repository()
+    items=candidates('Ik bel Merona pakket morgen.','Ik bel Merona parket morgen.',[])
+    assert len(items)==1 and items[0]['wrong']=='Merona pakket' and items[0]['right']=='Merona parket'
+    assert items[0]['mode']=='repeat'
+    repo.observe('one',items)
+    assert repo.list()[0]['state']=='pending'
+    repo.observe('two',items)
+    assert repo.list()[0]['state']=='learned'
+    from personalization import dictionary_replace
+    assert dictionary_replace('Een pakket voor Merona pakket.')=='Een pakket voor Merona parket.'
+
+def test_standalone_unknown_name_context_is_visible_as_a_proposal():
+    items=candidates('Merona pakket.','Merona parket.',[])
+    assert len(items)==1 and items[0]['mode']=='confirm'
+    assert items[0]['right']=='Merona parket'
+
+def test_existing_compound_name_learns_only_the_whole_name_alias():
+    identifier=storage.save_entry('dictionary',{'value':'Merona Parket','aliases':['merona parket']})
+    items=candidates('Ik bel Merona pakket morgen.','Ik bel Merona parket morgen.',storage.entries('dictionary'))
+    assert len(items)==1 and items[0]['mode']=='auto' and items[0]['known_id']==identifier
+    Repository().observe('one',items)
+    from personalization import dictionary_replace
+    assert dictionary_replace('Een pakket voor Merona pakket.')=='Een pakket voor Merona Parket.'
+
+@pytest.mark.parametrize(('before','after'),[
+    ('Mijn pakket is weg.','Mijn parket is weg.'),
+    ('Dit pakket is weg.','Dit parket is weg.'),
+    ('Een pakket is weg.','Een parket is weg.'),
+    ('Ik bel "Merona pakket".','Ik bel "Merona parket".'),
+    ('Ik bel Merona. pakket morgen.','Ik bel Merona. parket morgen.'),
+    ('Ik bel Merona niet morgen.','Ik bel Merona wel morgen.'),
+])
+def test_name_context_does_not_learn_ordinary_words_quotes_or_sentence_boundaries(before,after):
+    assert candidates(before,after,[])==[]
+
 def test_acronym_is_a_proposal_and_can_be_accepted():
     name();repo=Repository();items=change('Ik spreek XYZ morgen.','Ik spreek Lunaro morgen.')
     assert items[0]['mode']=='confirm'

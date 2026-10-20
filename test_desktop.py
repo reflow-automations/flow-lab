@@ -4,6 +4,7 @@ from types import SimpleNamespace as NS
 import threading
 import queue
 import ctypes
+import pytest
 import desktop_windows as w
 from desktop_helper import amplitude, Desktop
 
@@ -17,6 +18,189 @@ def test_audio_levels_and_native_layout():
 def test_native_selection_counts_utf16():
     assert w.utf16_slice('A\U0001f600B', 1, 3) == '\U0001f600'
     assert w.utf16_slice('A\U0001f600B', 3) == 'B'
+
+def winui_focus_fixture(monkeypatch,children=None):
+    host=NS(CurrentClassName='Microsoft.UI.Content.DesktopChildSiteBridge',CurrentIsPassword=False,
+            CurrentName='',CurrentControlType=50033,CurrentIsEnabled=True,owner=10,GetRuntimeId=lambda:(1,))
+    edit=NS(CurrentClassName='SyntheticEdit',CurrentIsPassword=False,CurrentName='',CurrentControlType=50004,
+            CurrentHasKeyboardFocus=True,CurrentIsEnabled=True,owner=10,GetRuntimeId=lambda:(2,))
+    nodes=[edit] if children is None else children
+    parent=NS(FindAll=lambda *_:(_ for _ in ()).throw(AssertionError('No fragment FindAll')))
+    root=NS(FindFirst=lambda *_:nodes[0] if nodes else None,
+            FindAll=lambda *_:(_ for _ in ()).throw(AssertionError('No full-window FindAll')))
+    def following(e):
+        index=next(i for i,node in enumerate(nodes) if node is e)+1
+        return nodes[index] if index<len(nodes) else None
+    uia=NS(GetFocusedElement=lambda:host,ElementFromHandle=lambda _:root,
+           RawViewWalker=NS(GetParentElement=lambda _:parent,GetFirstChildElement=lambda _:nodes[0] if nodes else None,GetNextSiblingElement=following),CreatePropertyCondition=lambda *args:args,CreateAndCondition=lambda *args:args,CreateOrCondition=lambda *args:args)
+    U=NS(UIA_HasKeyboardFocusPropertyId=1,UIA_ControlTypePropertyId=2,UIA_EditControlTypeId=50004,UIA_IsValuePatternAvailablePropertyId=3,UIA_IsTextPatternAvailablePropertyId=4,UIA_IsReadOnlyAttributeId=5,TreeScope_Descendants=4,TreeScope_Children=2)
+    monkeypatch.setattr(w,'foreground',lambda:10)
+    monkeypatch.setattr(w,'belongs_to_window',lambda u,e,hwnd,details:e.owner==hwnd)
+    return uia,U,host,edit,nodes
+
+def test_winui_host_resolves_only_its_unique_focused_editor(monkeypatch):
+    uia,U,host,edit,_=winui_focus_fixture(monkeypatch);details={}
+    assert w.focused_editor(uia,U,10,details) is edit
+    assert details['focus_resolution']=='hosted_focused_edit' and details['focus_host_class']==host.CurrentClassName
+
+@pytest.mark.parametrize(('kind','class_name'),[(50025,'GenericCustomHost'),(50026,'GenericGroup'),(50030,'BrowserDocument'),(50032,'GenericWindow'),(50033,'GenericPane')])
+def test_hosted_editor_resolution_is_not_app_or_class_specific(monkeypatch,kind,class_name):
+    uia,U,host,edit,_=winui_focus_fixture(monkeypatch);host.CurrentControlType=kind;host.CurrentClassName=class_name
+    assert w.focused_editor(uia,U,10) is edit
+
+def test_writable_document_role_is_supported_without_an_edit_role(monkeypatch):
+    uia,U,host,edit,_=winui_focus_fixture(monkeypatch);edit.CurrentControlType=50030
+    text=NS(DocumentRange=NS(GetAttributeValue=lambda _:False))
+    monkeypatch.setattr(w,'pattern',lambda e,U,name,interface:text if e is edit and name=='UIA_TextPatternId' else None)
+    assert w.focused_editor(uia,U,10) is edit
+
+def test_already_focused_writable_custom_editor_is_not_replaced(monkeypatch):
+    uia,U,host,edit,_=winui_focus_fixture(monkeypatch);host.CurrentHasKeyboardFocus=True
+    value=NS(CurrentIsReadOnly=False)
+    monkeypatch.setattr(w,'pattern',lambda e,U,name,interface:value if e is host and name=='UIA_ValuePatternId' else None)
+    assert w.focused_editor(uia,U,10) is host
+
+def test_winui_host_never_guesses_between_two_editors(monkeypatch):
+    uia,U,host,edit,nodes=winui_focus_fixture(monkeypatch)
+    nodes.append(NS(**{**vars(edit),'GetRuntimeId':lambda:(3,)}))
+    assert w.focused_editor(uia,U,10) is host
+
+def test_winui_editor_change_during_lookup_is_not_accepted(monkeypatch):
+    uia,U,host,edit,nodes=winui_focus_fixture(monkeypatch)
+    first=NS(**vars(edit));nodes[0]=NS(**{**vars(edit),'GetRuntimeId':lambda:(3,)})
+    uia.ElementFromHandle(10).FindFirst=lambda *_:first
+    assert w.focused_editor(uia,U,10) is host
+
+def test_winui_missing_parent_never_falls_back_to_a_full_window_scan(monkeypatch):
+    uia,U,host,edit,_=winui_focus_fixture(monkeypatch)
+    uia.RawViewWalker.GetParentElement=lambda _:None
+    assert w.focused_editor(uia,U,10) is host
+
+def test_winui_local_sibling_walk_has_a_fixed_limit(monkeypatch):
+    uia,U,host,edit,nodes=winui_focus_fixture(monkeypatch)
+    nodes.extend(NS(**{**vars(edit),'CurrentHasKeyboardFocus':False,'GetRuntimeId':lambda i=i:(i+3,)}) for i in range(20))
+    details={}
+    assert w.focused_editor(uia,U,10,details) is host
+    assert details['focused_siblings_examined']==16
+
+def test_capture_timeout_retains_technical_stage_without_starting_audio(monkeypatch):
+    class Pending:
+        cancelled=False
+        def result(self,timeout):raise TimeoutError()
+        def cancel(self):self.cancelled=True
+    pending=Pending()
+    def submit(fn,hwnd,details):
+        details.update(capture_stage='focus',focus_stage='winui_focused_siblings')
+        return pending
+    fake=NS(current=None,state='idle',learner=None,ident=0,recovery_store=NS(can_record=lambda:True),
+            hotkeys=NS(command=lambda *_:None),display=lambda *_:None,uia=NS(submit=submit),events=queue.Queue())
+    monkeypatch.setattr(w,'foreground',lambda:10)
+    Desktop.start(fake)
+    kind,_,target=fake.events.get(timeout=.5)
+    assert kind=='captured' and not target.editable and pending.cancelled
+    assert target.details['capture_error']=='TimeoutError'
+    assert target.details['focus_stage']=='winui_focused_siblings'
+    assert 'duurde te lang' in target.reason
+
+def test_winui_fallback_rejects_unfocused_disabled_and_other_window(monkeypatch):
+    uia,U,host,edit,_=winui_focus_fixture(monkeypatch)
+    edit.CurrentHasKeyboardFocus=False;assert w.focused_editor(uia,U,10) is host
+    edit.CurrentHasKeyboardFocus=True;edit.CurrentIsEnabled=False;assert w.focused_editor(uia,U,10) is host
+    edit.CurrentIsEnabled=True;edit.owner=99;assert w.focused_editor(uia,U,10) is host
+    edit.owner=10;monkeypatch.setattr(w,'foreground',lambda:99);assert w.focused_editor(uia,U,10) is host
+
+def test_winui_resolution_keeps_password_protection(monkeypatch):
+    uia,U,host,edit,_=winui_focus_fixture(monkeypatch);edit.CurrentIsPassword=True
+    monkeypatch.setattr(w,'pattern',lambda *_:(_ for _ in ()).throw(AssertionError('No password pattern/text reads')))
+    target=w.capture_target(uia,U,10)
+    assert target.password and not target.editable
+    host.CurrentIsPassword=True;assert w.focused_editor(uia,U,10) is host
+
+def test_terminal_host_does_not_use_the_winui_fallback(monkeypatch):
+    uia,U,host,edit,_=winui_focus_fixture(monkeypatch);host.CurrentName='Terminal'
+    assert w.focused_editor(uia,U,10) is host
+
+def test_learning_snapshot_uses_the_same_winui_focus_resolution(monkeypatch):
+    uia,U,host,edit,_=winui_focus_fixture(monkeypatch)
+    monkeypatch.setattr(w,'pattern',lambda *_:None)
+    monkeypatch.setattr(w,'field_text',lambda e,_:'Fictieve tekst.' if e is edit else (_ for _ in ()).throw(AssertionError('Not the focused editor')))
+    assert w.learning_snapshot(uia,U,10,(2,))=={'text':'Fictieve tekst.','composing':False}
+
+def test_uia_worker_uses_provider_timeouts_without_setting_focus():
+    worker=w.UiaWorker()
+    connection,transaction,auto=worker.submit(lambda uia,U:(uia.ConnectionTimeout,uia.TransactionTimeout,uia.AutoSetFocus)).result(timeout=3)
+    assert connection==transaction==300 and not auto
+
+def test_transient_host_focus_can_settle_before_recording(monkeypatch):
+    uia,U,host,edit,_=winui_focus_fixture(monkeypatch)
+    reads=[];waits=[];details={}
+    def delayed_focus(*_):
+        reads.append(True)
+        return edit if len(reads)>1 else None
+    uia.ElementFromHandle(10).FindFirst=delayed_focus
+    def capture(uia,U,hwnd,current):
+        e=w.focused_editor(uia,U,hwnd,current)
+        return w.Target(hwnd,editable=e is edit,details=current)
+    monkeypatch.setattr(w,'capture_target',capture)
+    monkeypatch.setattr(w.time,'sleep',waits.append)
+    target=w.capture_with_focus_retry(uia,U,10,details)
+    assert target.editable and waits==[.08]
+    assert details['capture_attempts']==2 and details['focus_resolution']=='hosted_focused_edit'
+    assert details['capture_attempt_stages'][0]['focus_lookup_result']=='no_focused_editor'
+    assert 'focus_lookup_result' not in details
+
+
+def test_missing_host_focus_retry_is_bounded(monkeypatch):
+    waits=[];calls=[]
+    monkeypatch.setattr(w,'foreground',lambda:10)
+    monkeypatch.setattr(w.time,'sleep',waits.append)
+    def capture(uia,U,hwnd,details):
+        calls.append(True);details['focus_lookup_result']='no_focused_editor'
+        return w.Target(hwnd,details=details)
+    monkeypatch.setattr(w,'capture_target',capture)
+    target=w.capture_with_focus_retry(None,None,10)
+    assert not target.editable and len(calls)==3 and waits==[.08,.12]
+    assert target.details['capture_attempts']==3
+
+
+@pytest.mark.parametrize('kind',['editable','password','readonly','ambiguous','provider_error'])
+def test_focus_retry_never_retargets_an_identified_or_protected_field(monkeypatch,kind):
+    monkeypatch.setattr(w,'foreground',lambda:10)
+    monkeypatch.setattr(w.time,'sleep',lambda _:(_ for _ in ()).throw(AssertionError('No retry')))
+    def capture(uia,U,hwnd,details):
+        if kind=='provider_error':raise RuntimeError('provider failed')
+        return w.Target(hwnd,editable=kind=='editable',password=kind=='password',details=details)
+    monkeypatch.setattr(w,'capture_target',capture)
+    if kind=='provider_error':
+        with pytest.raises(RuntimeError):w.capture_with_focus_retry(None,None,10)
+    else:assert w.capture_with_focus_retry(None,None,10).details['capture_attempts']==1
+
+
+@pytest.mark.parametrize('change_during_wait',[False,True])
+def test_focus_retry_stops_at_window_change(monkeypatch,change_during_wait):
+    state={'hwnd':10};calls=[]
+    monkeypatch.setattr(w,'foreground',lambda:state['hwnd'])
+    def capture(uia,U,hwnd,details):
+        calls.append(True);details['focus_lookup_result']='no_focused_editor'
+        if not change_during_wait:state['hwnd']=99
+        return w.Target(hwnd,details=details)
+    monkeypatch.setattr(w,'capture_target',capture)
+    monkeypatch.setattr(w.time,'sleep',lambda _:state.update(hwnd=99))
+    target=w.capture_with_focus_retry(None,None,10)
+    assert not target.editable and len(calls)==1 and target.reason=='Het actieve venster is gewijzigd'
+
+
+@pytest.mark.parametrize('readonly',[True,1])
+def test_explicit_readonly_editor_never_becomes_a_paste_target(monkeypatch,readonly):
+    edit=NS(CurrentClassName='SyntheticEdit',CurrentControlType=50004,CurrentIsEnabled=True,CurrentIsPassword=False,CurrentName='')
+    text=NS(DocumentRange=NS(GetAttributeValue=lambda _:readonly),
+            GetSelection=lambda:(_ for _ in ()).throw(AssertionError('Do not inspect a read-only selection')))
+    uia=NS(GetFocusedElement=lambda:edit);U=NS(UIA_EditControlTypeId=50004,UIA_IsReadOnlyAttributeId=1)
+    monkeypatch.setattr(w,'foreground',lambda:10)
+    monkeypatch.setattr(w,'belongs_to_window',lambda *_:True)
+    monkeypatch.setattr(w,'pattern',lambda e,U,name,interface:text if name=='UIA_TextPatternId' else None)
+    target=w.capture_target(uia,U,10)
+    assert not target.editable and target.reason=='Dit tekstvak is alleen-lezen.'
 
 def target_fixture(monkeypatch):
     element=NS(CurrentIsPassword=False, GetRuntimeId=lambda:(1,2))

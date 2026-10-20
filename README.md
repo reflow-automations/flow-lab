@@ -25,6 +25,19 @@ merkassets en is niet verbonden aan Wispr Flow.
 - Zoek en kopieer transcripties uit de afgelopen 30 dagen.
 - Laat geschikte woordcorrecties na dictatie lokaal leren, met voorstellen en ongedaan maken.
 
+### Tekstvelden in verschillende apps
+
+Flow Lab herkent het actieve tekstveld via Windows-toegankelijkheid, zonder
+een lijst met appnamen. Ook editors binnen een groter venster kunnen worden
+herkend. Als Windows tijdelijk alleen het buitenste venster doorgeeft, volgt
+voor de opname een korte hercontrole binnen hetzelfde actieve venster.
+
+Niet elke app geeft tekst en cursor voldoende door aan Windows. Bij een
+onbekend of gewijzigd doel plakt Flow Lab niet automatisch. Het resultaat
+blijft beschikbaar in de app om te kopieren of bewust opnieuw te plaatsen.
+Wachtwoordvelden en alleen-lezenvelden zijn uitgesloten. Compatibiliteit met
+iedere app is niet gegarandeerd; een geslaagde proef bewijst het geteste veld.
+
 ## Gebruikt dit Ollama?
 
 Nee. Flow Lab start zelf lokale modelservers als subprocessen:
@@ -378,16 +391,23 @@ Ga in de app naar **Instellingen > OpenRouter instellen**, of naar het tabblad
 **OpenRouter**. Plak je eigen OpenRouter-sleutel in het gemaskeerde veld en kies
 **Sleutel veilig opslaan**. De app bewaart die met Windows DPAPI versleuteld voor
 je Windows-account in de uitgesloten map `data/`. De sleutel wordt niet teruggetoond.
+Daarna zie je **Sleutel toegevoegd** en zijn het invoerveld en Opslaan uitgeschakeld.
+Via **Sleutel wijzigen** kun je bewust de ene actieve sleutel vervangen.
 Een alternatief is `OPENROUTER_API_KEY` in de lokale `.env.local`; dat bestand is
 dan gewone tekst en blijft uitgesloten van Git. Gebruik geen OpenAI-sleutel.
 
-1. Klik **Gratis modellen ophalen**. Alleen actuele gratis tekstmodellen met
+1. Klik **Modellen ophalen**. Alleen actuele gratis tekstmodellen met
    voldoende context en nultarief worden aangeboden; geen moderatiemodellen.
-2. Kies een vast model en klik **Modelkeuze opslaan**.
+2. Begin met een van de enkele startpunten. Via **Alle gratis modellen tonen**
+   kun je de volledige lijst bekijken. Je huidige model wordt niet automatisch vervangen.
+   Kies een vast model en klik **Modelkeuze opslaan**.
 3. Controleer de sleutel en je actuele dagquotum met **Sleutel / quotum controleren**.
-4. Gebruik **Snelheid testen met voorbeeldtekst**. Dit verstuurt alleen een vaste
-   fictieve tekst, opent geen microfoon en maakt geen geschiedenisregel.
-5. Kies pas daarna **Lokale audio, OpenRouter gratis** als verwerkingsoptie.
+4. Gebruik **Opgeslagen model testen met voorbeeldtekst**. Dit verstuurt alleen een vaste
+   fictieve tekst, opent geen microfoon en maakt geen geschiedenisregel. Een nieuwe
+   modelkeuze moet eerst zijn opgeslagen. Deze tijd meet alleen de opmaakproef,
+   niet de hele route van spreken tot plaatsen.
+5. Kies pas daarna **OpenRouter gebruiken voor dictatie** op dezelfde pagina,
+   of **Lokale audio, OpenRouter gratis** bij Instellingen.
    Alleen instellen of testen schakelt de standaard niet om; die blijft lokaal.
 
 Gratis betekent niet lokaal: de herkende tekst gaat via OpenRouter naar de gekozen
@@ -405,6 +425,9 @@ Eén lang dictaat kan door tekstsegmenten meerdere gratis verzoeken kosten.
 Gratis capaciteit kan druk zijn. Een catalogusvermelding garandeert geen beschikbare
 provider, snelheid of goede Nederlandse opmaak. Vergelijk met dezelfde voorbeeldtekst
 en houd volledig lokaal als betrouwbare uitwijkkeuze op je eigen pc.
+De startpunten zijn gebaseerd op het type model en de actuele catalogus, niet op
+een bewezen ranglijst voor Nederlandse dictaten. Het eerste voorstel is alleen
+zichtbaar zolang dat exacte gratis model nog in de catalogus staat.
 Bronnen: [gratis router en beperkingen](https://openrouter.ai/docs/guides/routing/routers/free-router),
 [limieten en actuele quotumcontrole](https://openrouter.ai/docs/api/reference/limits),
 [provider- en privacyfilters](https://openrouter.ai/docs/guides/routing/provider-selection).

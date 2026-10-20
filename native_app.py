@@ -10,6 +10,7 @@ from urllib.parse import urlencode,quote
 import httpx
 from shortcut_config import shortcut,shortcut_label,KEYS,MODIFIERS,LABELS
 from model_guide import load_guide,guide_text
+from openrouter_guide import model_choices,SUGGESTIONS,LIMITS as ROUTER_GUIDE_LIMITS
 from PIL import Image,ImageTk
 
 # Reflow palette (branding/brand-guide.md) with the Flow Lab app surfaces.
@@ -284,7 +285,7 @@ class NativeApp:
         ttk.Label(grid,textvariable=self.settings_model_hint,style='Muted.TLabel',wraplength=300,justify='left').grid(row=0,column=2,rowspan=3,sticky='nw',padx=(28,0),pady=5)
         actions=ttk.Frame(options);actions.pack(fill='x',pady=(12,0))
         ttk.Button(actions,text='Verwerking opslaan',style='Primary.TButton',command=save_preferences).pack(side='left')
-        ttk.Button(actions,text='Welke modellen kies ik?',command=self.show_model_guide).pack(side='left',padx=8)
+        ttk.Button(actions,text='Welke verwerking past bij mij?',command=self.show_model_guide).pack(side='left',padx=8)
         ttk.Button(actions,text='OpenRouter instellen',style='Link.TButton',command=lambda:self.show('openrouter')).pack(side='left',padx=8)
         learn=card(tab,'Leren van correcties','Verbeter binnen een minuut in hetzelfde tekstvak. Na 1,5 seconde rust beoordeelt Flow Lab een duidelijke correctie.')
         self.learning_enabled=tk.BooleanVar(value=self.app.config.get('auto_learn',False))
@@ -480,66 +481,170 @@ class NativeApp:
         except Exception:self.status.set('Klembord is bezet. Probeer opnieuw.')
 
     def build_openrouter(self):
-        _,tab=scroll_page(self.tabs['openrouter']);self.router_models=[]
-        page_header(tab,'OpenRouter','Optioneel: gratis tekstopmaak in de cloud uitproberen. Audio blijft lokaal; alleen de herkende tekst gaat naar de gekozen provider.')
-        self.router_status=tk.StringVar(value='Nog niet gecontroleerd.');ttk.Label(tab,textvariable=self.router_status,style='PageMuted.TLabel',wraplength=800).pack(anchor='w',pady=(0,12))
-        keycard=card(tab,'Sleutel','De opgeslagen sleutel wordt niet teruggetoond. Je kunt ook OPENROUTER_API_KEY in .env.local gebruiken.')
-        row=ttk.Frame(keycard);row.pack(fill='x')
-        self.router_key=tk.StringVar();ttk.Entry(row,textvariable=self.router_key,show='*',width=55).pack(side='left',fill='x',expand=True)
-        def save_key():
-            key=self.router_key.get().strip();self.router_key.set('')
-            def saved(data,error):
-                self.router_status.set(error if error else 'Sleutel versleuteld opgeslagen voor je Windows-account.')
-                if not error:self.load_openrouter_status()
-            self.request('/api/openrouter/key',saved,'POST',{'key':key})
-        ttk.Button(row,text='Sleutel veilig opslaan',style='Primary.TButton',command=save_key).pack(side='left',padx=8)
-        modelcard=card(tab,'Model','Gratis modellen kunnen druk of tijdelijk niet beschikbaar zijn. Eén lang dictaat kan meerdere verzoeken gebruiken.')
-        self.router_model=tk.StringVar();self.router_combo=ttk.Combobox(modelcard,textvariable=self.router_model,state='readonly',width=82);self.router_combo.pack(fill='x')
+        _,tab=scroll_page(self.tabs['openrouter']);self.router_models=[];self.router_saved_model=''
+        self.router_key_checked=False;self.router_key_locked=False;self.router_key_editing=False;self.router_key_usable=False
+        self.router_testing=False;self.router_fetching=False
+        page_header(tab,'OpenRouter','Kies hier je gratis opmaakmodel. Audio blijft lokaal; alleen de herkende tekst gaat naar de gekozen provider.')
+        self.router_status=tk.StringVar(value='Sleutelstatus ophalen...')
+        ttk.Label(tab,textvariable=self.router_status,style='PageMuted.TLabel',wraplength=800).pack(anchor='w',pady=(0,12))
+        keycard=card(tab,'Sleutel','Er is één actieve sleutel. De opgeslagen waarde wordt nooit getoond.')
+        self.router_key_notice=tk.StringVar(value='Sleutelstatus wordt gecontroleerd.')
+        ttk.Label(keycard,textvariable=self.router_key_notice,style='Muted.TLabel').pack(anchor='w',pady=(0,8))
+        row=ttk.Frame(keycard);row.pack(fill='x');self.router_key=tk.StringVar()
+        self.router_key_input=ttk.Entry(row,textvariable=self.router_key,show='*',width=40,state='disabled')
+        self.router_key_input.pack(side='left',fill='x',expand=True)
+        self.router_key_save=ttk.Button(row,text='Sleutel veilig opslaan',style='Primary.TButton',command=self.save_router_key,state='disabled')
+        self.router_key_save.pack(side='left',padx=(8,0))
+        self.router_key_change=ttk.Button(row,text='Sleutel wijzigen',command=self.edit_router_key,state='disabled')
+        self.router_key_change.pack(side='left',padx=(8,0))
+        self.router_key_cancel=ttk.Button(keycard,text='Wijzigen annuleren',style='Link.TButton',command=self.cancel_router_key)
+        self.router_key.trace_add('write',lambda *_:self.refresh_router_controls())
+        modelcard=card(tab,'Model kiezen','Begin met de kleine keuzelijst. De voorstellen zijn startpunten voor een proef, geen bewezen snelheidsranglijst.')
+        self.router_recommendation=tk.StringVar(value='Haal de modellen op voor een concreet eerste voorstel.')
+        ttk.Label(modelcard,textvariable=self.router_recommendation,style='Muted.TLabel',wraplength=800).pack(anchor='w',pady=(0,8))
+        self.router_model=tk.StringVar();self.router_choice=tk.StringVar();self.router_choice_map={}
+        self.router_combo=ttk.Combobox(modelcard,textvariable=self.router_choice,state='readonly',width=70);self.router_combo.pack(fill='x')
+        self.router_combo.bind('<<ComboboxSelected>>',self.router_choice_selected)
+        self.router_model_hint=tk.StringVar(value='Haal de actuele modellen op om de eerste voorstellen te zien.')
+        ttk.Label(modelcard,textvariable=self.router_model_hint,style='Muted.TLabel',wraplength=800,justify='left').pack(anchor='w',pady=(8,0))
+        self.router_all=tk.BooleanVar(value=False)
+        ttk.Checkbutton(modelcard,text='Alle gratis modellen tonen (meer keuzes)',variable=self.router_all,command=self.populate_router_choices).pack(anchor='w',pady=(8,0))
         buttons=ttk.Frame(modelcard);buttons.pack(fill='x',pady=(10,0))
-        def models():
-            self.router_status.set('Actuele gratis modellen ophalen...')
-            def loaded(data,error):
-                if error:self.router_status.set(error);return
-                self.router_models=data['models'];ids=[m['id'] for m in self.router_models];self.router_combo.configure(values=ids)
-                if self.router_model.get() not in ids:self.router_model.set('')
-                self.router_status.set(f'{len(ids)} gratis tekstmodellen gevonden. Kies er één en sla de modelkeuze op.')
-            self.request('/api/openrouter/models?refresh=true',loaded)
-        def save_model():
-            def saved(data,error):self.router_status.set(error if error else 'Model opgeslagen. Kies bij Verwerking OpenRouter gratis om het te gebruiken.')
-            self.request('/api/openrouter/model',saved,'POST',{'model':self.router_model.get()})
-        def check():
-            def checked(data,error):
-                if error:self.router_status.set(error);return
-                q=data['free_requests'];self.router_status.set('Sleutel geldig. Gratis verzoeken resterend vandaag: '+str(q.get('remaining') if q.get('remaining') is not None else 'niet opgegeven')+' (daglimiet '+str(q.get('limit') if q.get('limit') is not None else 'onbekend')+').')
-            self.request('/api/openrouter/check',checked,'POST')
-        for index,(label,fn) in enumerate([('Modelkeuze opslaan',save_model),('Gratis modellen ophalen',models),('Sleutel / quotum controleren',check)]):
-            ttk.Button(buttons,text=label,style='Primary.TButton' if index==0 else 'TButton',command=fn).pack(side='left',padx=(0,8))
-        privacy=card(tab,'Privacy','Als je dit uitzet, kunnen providers je tekst bewaren of voor training gebruiken volgens hun voorwaarden. Alleen :free-modellen met nultarief.')
-        self.router_private=tk.BooleanVar(value=True)
-        privacy_row=ttk.Frame(privacy);privacy_row.pack(fill='x')
+        self.router_fetch_button=ttk.Button(buttons,text='Modellen ophalen',command=self.fetch_router_models);self.router_fetch_button.pack(side='left',padx=(0,8))
+        self.router_model_save=ttk.Button(buttons,text='Modelkeuze opslaan',style='Primary.TButton',command=self.save_router_model,state='disabled');self.router_model_save.pack(side='left',padx=(0,8))
+        ttk.Button(buttons,text='Sleutel / quotum controleren',command=self.check_router_key).pack(side='left')
+        self.router_saved_notice=tk.StringVar(value='Nog geen model opgeslagen.')
+        ttk.Label(modelcard,textvariable=self.router_saved_notice,style='Muted.TLabel',wraplength=800).pack(anchor='w',pady=(10,0))
+        self.router_activate=ttk.Button(modelcard,text='OpenRouter gebruiken voor dictatie',command=self.activate_router,state='disabled');self.router_activate.pack(anchor='w',pady=(8,0))
+        ttk.Label(modelcard,text='In Instellingen kies je lokaal of cloud. Het precieze OpenRouter-model kies je op deze pagina.',style='Muted.TLabel',wraplength=800).pack(anchor='w',pady=(8,0))
+        privacy=card(tab,'Privacy','Geen geschikte provider gevonden? Probeer een ander model met dezelfde privacykeuze. Je OpenRouter-accountbeleid blijft ook gelden.')
+        self.router_private=tk.BooleanVar(value=True);privacy_row=ttk.Frame(privacy);privacy_row.pack(fill='x')
         ttk.Checkbutton(privacy_row,text='Alleen providers zonder gegevensverzameling',variable=self.router_private).pack(side='left')
         def save_privacy():
-            def saved(data,error):self.router_status.set(error if error else 'Privacykeuze opgeslagen. Je OpenRouter-accountbeleid blijft ook gelden.')
+            def saved(data,error):self.router_status.set(error if error else 'Privacykeuze opgeslagen. Je accountbeleid blijft ook gelden.')
             self.request('/api/openrouter/privacy',saved,'POST',{'data_collection':'deny' if self.router_private.get() else 'allow'})
         ttk.Button(privacy_row,text='Privacykeuze opslaan',command=save_privacy).pack(side='left',padx=10)
-        test_card=card(tab,'Proef','Test met een vaste, verzonnen tekst. Er wordt geen opname gebruikt.')
-        def test():
-            self.router_status.set('Test met vaste, verzonnen tekst. Er wordt geen opname gebruikt...')
-            def tested(data,error):
-                if error:self.router_status.set(error);return
-                set_text(self.router_result,data['text'])
-                self.router_status.set(f"Test klaar in {data['ms']/1000:.2f} s. "+(data.get('warning') or 'Beoordeel ook de inhoud; dit is één korte proef.'))
-            self.request('/api/openrouter/test',tested,'POST')
-        ttk.Button(test_card,text='Snelheid testen met voorbeeldtekst',command=test).pack(anchor='w')
-        self.router_result=text_box(test_card,4,10);self.router_result.pack(fill='both',expand=True,pady=(10,0))
+        ttk.Label(privacy,text='Als je dit uitzet, kunnen providers tekst bewaren of voor training gebruiken volgens hun voorwaarden.',style='Muted.TLabel',wraplength=800).pack(anchor='w',pady=(8,0))
+        test_card=card(tab,'Proef zonder microfoon','1. Kies een model en sla het op. 2. Test de voorbeeldtekst. 3. Controleer de tijd én of de inhoud klopt.')
+        self.router_test_notice=tk.StringVar(value='De proef gebruikt het opgeslagen model. Je hoeft niet te praten.')
+        ttk.Label(test_card,textvariable=self.router_test_notice,style='Muted.TLabel',wraplength=800).pack(anchor='w')
+        ttk.Label(test_card,text='Voorbeeld: hallo Alex de voorbeeldplanning is klaar ik kan vrijdag niet maar maandag wel het bedrag is 1500 euro exclusief btw',style='Muted.TLabel',wraplength=800).pack(anchor='w',pady=(8,0))
+        self.router_test_button=ttk.Button(test_card,text='Opgeslagen model testen met voorbeeldtekst',command=self.test_router_model,state='disabled');self.router_test_button.pack(anchor='w',pady=(10,0))
+        self.router_result=text_box(test_card,4,10);self.router_result.pack(fill='both',expand=True,pady=(10,0));self.router_result.configure(state='disabled')
+        ttk.Label(test_card,text='Echt dicteren? Activeer OpenRouter hierboven. Klik daarna in je gewenste tekstvak en gebruik je gewone dicteersneltoets.',style='Muted.TLabel',wraplength=800).pack(anchor='w',pady=(8,0))
+
+    def refresh_router_controls(self):
+        if not hasattr(self,'router_test_button') or not self.exists():return
+        editing=self.router_key_checked and self.router_key_editing
+        self.router_key_input.configure(state='normal' if editing else 'disabled')
+        self.router_key_save.configure(state='normal' if editing and bool(self.router_key.get().strip()) else 'disabled',text=('Sleutel vervangen' if editing else 'Sleutel opgeslagen') if self.router_key_locked else 'Sleutel veilig opslaan')
+        self.router_key_change.configure(state='normal' if self.router_key_locked and not editing else 'disabled')
+        if self.router_key_locked and editing:self.router_key_cancel.pack(anchor='w',pady=(6,0))
+        else:self.router_key_cancel.pack_forget()
+        chosen=self.router_model.get();saved=self.router_saved_model
+        present=chosen in {m['id'] for m in self.router_models}
+        ready=self.router_key_usable and not editing and bool(saved) and chosen==saved
+        self.router_model_save.configure(state='normal' if present and chosen!=saved and not self.router_fetching else 'disabled')
+        self.router_fetch_button.configure(state='disabled' if self.router_fetching else 'normal')
+        self.router_test_button.configure(state='normal' if ready and not self.router_testing else 'disabled')
+        active=self.app.config.get('formatter')=='openrouter-free'
+        self.router_activate.configure(state='normal' if ready and not active else 'disabled',text='OpenRouter is actief voor dictatie' if active else 'OpenRouter gebruiken voor dictatie')
+        self.router_saved_notice.set('Opgeslagen model: '+saved if saved else 'Nog geen model opgeslagen. Een keuze in de lijst is pas opgeslagen na de knop.')
+        self.router_test_notice.set(('Sla de nieuwe modelkeuze eerst op. ' if chosen!=saved else '')+'De proef gebruikt '+(saved or 'nog geen opgeslagen model')+'. Geen microfoon of echte dictaten.')
+
+    def edit_router_key(self):
+        if not self.router_key_locked:return
+        self.router_key_editing=True;self.router_key.set('');self.refresh_router_controls();self.router_key_input.focus_set()
+
+    def cancel_router_key(self):
+        self.router_key_editing=False;self.router_key.set('');self.refresh_router_controls()
+
+    def save_router_key(self):
+        if not self.router_key_checked or not self.router_key_editing:return
+        key=self.router_key.get().strip()
+        if not key:return
+        self.router_key.set('');self.router_key_checked=False;self.refresh_router_controls()
+        def saved(data,error):
+            if error:
+                self.router_key_checked=True;self.refresh_router_controls();self.router_status.set(error);return
+            self.load_openrouter_status()
+            self.router_status.set('Sleutel opgeslagen. Er is één actieve sleutel.')
+        self.request('/api/openrouter/key',saved,'POST',{'key':key})
+
+    def populate_router_choices(self):
+        chosen=self.router_model.get();choices=model_choices(self.router_models,self.router_saved_model,self.router_all.get())
+        available={m['id'] for m in self.router_models}
+        first=next((key for key in SUGGESTIONS if key in available),None)
+        self.router_recommendation.set('Beginproef: '+SUGGESTIONS[first][0]+'. Selecteer dit zelf in de lijst; je huidige keuze blijft behouden.' if first else 'Haal de actuele modellen op. Als onze startpunten ontbreken, kun je de overige modellen zelf vergelijken.')
+        ids={item['id'] for item in choices}
+        if chosen and chosen not in ids:
+            current=next((m for m in self.router_models if m['id']==chosen),None)
+            choices.append({'id':chosen,'label':('Geselecteerd: '+current.get('name',chosen)) if current else 'Opgeslagen keuze: '+chosen,
+                            'hint':'Deze keuze is nog niet opnieuw gecontroleerd. Haal de modellen op en test de opgeslagen keuze.'})
+        self.router_choice_map={item['label']:item for item in choices}
+        self.router_combo.configure(values=list(self.router_choice_map))
+        self.router_choice.set(next((label for label,item in self.router_choice_map.items() if item['id']==chosen),''))
+        item=self.router_choice_map.get(self.router_choice.get())
+        self.router_model_hint.set(item['hint'] if item else ROUTER_GUIDE_LIMITS)
+        self.refresh_router_controls()
+
+    def router_choice_selected(self,event=None):
+        item=self.router_choice_map.get(self.router_choice.get())
+        if item:self.router_model.set(item['id']);self.router_model_hint.set(item['hint'])
+        self.refresh_router_controls()
+
+    def fetch_router_models(self):
+        self.router_fetching=True;self.router_status.set('Actuele gratis modellen ophalen...');self.refresh_router_controls()
+        def loaded(data,error):
+            self.router_fetching=False
+            if error:self.router_status.set(error);self.refresh_router_controls();return
+            self.router_models=data['models'];self.populate_router_choices()
+            self.router_status.set(str(len(self.router_models))+' gratis tekstmodellen gevonden. Eerst zie je enkele startpunten en eventueel je huidige keuze.')
+        self.request('/api/openrouter/models?refresh=true',loaded)
+
+    def save_router_model(self):
+        chosen=self.router_model.get()
+        if chosen not in {m['id'] for m in self.router_models}:return
+        def saved(data,error):
+            if error:self.router_status.set(error);return
+            self.router_saved_model=data['model'];self.populate_router_choices()
+            self.router_status.set('Model opgeslagen. Test het hieronder of kies OpenRouter gebruiken voor dictatie.')
+        self.request('/api/openrouter/model',saved,'POST',{'model':chosen})
+
+    def activate_router(self):
+        if not self.router_key_usable or self.router_key_editing or not self.router_saved_model or self.router_model.get()!=self.router_saved_model:return
+        self.app.events.put(('preferences',{'formatter':'openrouter-free','paragraphs':self.app.config.get('paragraphs','normaal'),'style':self.app.config.get('style','bericht')}))
+        self.root.after(250,self.refresh_router_controls)
+
+    def check_router_key(self):
+        def checked(data,error):
+            if error:self.router_status.set(error);return
+            remaining=data['free_requests'].get('remaining')
+            self.router_status.set('Sleutel geldig. Gratis verzoeken resterend vandaag: '+str(remaining if remaining is not None else 'niet opgegeven')+'.')
+        self.request('/api/openrouter/check',checked,'POST')
+
+    def test_router_model(self):
+        if not self.router_key_usable or self.router_key_editing or not self.router_saved_model or self.router_model.get()!=self.router_saved_model or self.router_testing:return
+        tested_model=self.router_saved_model;self.router_testing=True;self.refresh_router_controls()
+        self.router_status.set('Voorbeeldtekst testen met '+tested_model+'...')
+        def tested(data,error):
+            self.router_testing=False;self.refresh_router_controls()
+            if error:
+                self.router_status.set(error);set_text(self.router_result,'Proef mislukt voor '+tested_model+'. '+error);self.router_result.configure(state='disabled');return
+            set_text(self.router_result,'Model: '+tested_model+'\n\n'+data['text']);self.router_result.configure(state='disabled')
+            self.router_status.set(f"Opmaakproef in {data['ms']/1000:.2f} s. "+(data.get('warning') or 'Controleer zelf ook de inhoud. Dit meet geen spraakherkenning of plaatsing.'))
+        self.request('/api/openrouter/test',tested,'POST')
 
     def load_openrouter_status(self):
         def loaded(data,error):
             if error:self.router_status.set(error);return
-            self.router_model.set(data['model'])
-            self.router_private.set(data.get('data_collection','deny')=='deny')
-            key_message='Sleutel aanwezig.' if data['configured'] else ('De ingevulde waarde heeft geen OpenRouter-formaat.' if data.get('key_present') else 'Voeg je eigen OpenRouter-sleutel toe.')
-            self.router_status.set(key_message+' Alleen gratis modellen; standaardverwerking blijft ongewijzigd.')
+            self.router_key_checked=True;self.router_key_locked=bool(data.get('key_present') or data.get('configured'))
+            self.router_key_usable=bool(data.get('configured'))
+            self.router_key_editing=not self.router_key_locked;self.router_key.set('')
+            self.router_key_notice.set('Sleutel toegevoegd. De waarde blijft verborgen.' if data['configured'] else 'Sleutel aanwezig, maar het formaat klopt niet. Kies Sleutel wijzigen.' if self.router_key_locked else 'Nog geen sleutel toegevoegd.')
+            self.router_saved_model=data['model'];self.router_model.set(data['model'])
+            self.router_private.set(data.get('data_collection','deny')=='deny');self.populate_router_choices()
+            self.router_status.set('Kies en test hier je OpenRouter-model. Je actieve verwerking verandert pas als je dat zelf kiest.')
         self.request('/api/openrouter/status',loaded)
 
     def build_history(self):
