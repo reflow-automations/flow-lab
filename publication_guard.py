@@ -5,7 +5,10 @@ from pathlib import PurePosixPath
 import re
 import subprocess
 
-BINARY={'assets/flow-lab.ico'}
+BINARY={'assets/flow-lab.ico':b'\x00\x00\x01\x00',
+        'assets/brand/flow-lab.ico':b'\x00\x00\x01\x00',
+        'assets/brand/flow-lab-logo.png':b'\x89PNG\r\n\x1a\n',
+        'assets/brand/flow-lab-mark.png':b'\x89PNG\r\n\x1a\n'}
 GENERATED={'SOURCE-MANIFEST.json'}
 
 def validate_public_files(contents,allowed):
@@ -18,7 +21,7 @@ def validate_public_files(contents,allowed):
             errors.append(name+': private/generated directory');continue
         if p.name.startswith('.env') and name!='.env.example':errors.append(name+': environment file');continue
         if name in BINARY:
-            if not data.startswith(b'\x00\x00\x01\x00'):errors.append(name+': expected ICO file')
+            if not data.startswith(BINARY[name]):errors.append(name+': unexpected image format')
             continue
         try:text=data.decode('utf-8')
         except UnicodeDecodeError:errors.append(name+': not UTF-8');continue

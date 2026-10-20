@@ -1,4 +1,5 @@
 import queue
+import pytest
 from pathlib import Path
 from types import SimpleNamespace as NS
 import tkinter as tk
@@ -6,17 +7,18 @@ from fastapi.testclient import TestClient
 import storage
 from app import app as api
 from engines import APP_PORT
-from native_app import NativeApp,entry_payload
+from native_app import NativeApp,entry_payload,phone_library
 
 def test_native_payload_preserves_snippet_exactly():
     text='Eerste regel.\n\n  Tweede regel.  '
     payload=entry_payload('snippet',None,'Test',text,'  testzin\nvariant\n',True)
     assert payload['value']==text and payload['aliases']==['testzin','variant']
 
-def test_native_window_library_history_roundtrip(monkeypatch,tk_window):
+@pytest.mark.parametrize('formatter',['local','verbatim'])
+def test_native_window_library_history_roundtrip(monkeypatch,tk_window,formatter):
     root=tk_window
     client=TestClient(api)
-    fake=NS(root=root,root_path=Path(__file__).resolve().parent,service_url=f'http://127.0.0.1:{APP_PORT}',events=queue.Queue(),config={'hotkey':'ctrl-shift-space','formatter':'local'},replay_key='alt-shift-z',write_state=lambda:None,shortcut_settings=lambda:None,quit_all=lambda:None)
+    fake=NS(root=root,root_path=Path(__file__).resolve().parent,service_url=f'http://127.0.0.1:{APP_PORT}',events=queue.Queue(),config={'hotkey':'ctrl-shift-space','formatter':formatter},replay_key='alt-shift-z',write_state=lambda:None,shortcut_settings=lambda:None,quit_all=lambda:None)
     def request(self,path,callback,method='GET',data=None):
         r=client.request(method,path,json=data,headers={'Origin':fake.service_url})
         callback(r.json() if r.status_code<400 else None,None if r.status_code<400 else str(r.json()))
@@ -77,3 +79,11 @@ def test_native_window_library_history_roundtrip(monkeypatch,tk_window):
         window.show_model_guide();window.guide_window.withdraw()
         assert window.guide_window.title()=='Flow Lab - Welke modellen kies ik?'
     finally:root.destroy()
+
+def test_phone_library_export_matches_android_format():
+    data={'dictionary':[{'id':'1','kind':'dictionary','name':'Supabase','value':'Supabase','aliases':['superbase'],'enabled':True,'source':'user','updated_at':1},
+                        {'id':'2','kind':'dictionary','name':'Wispr','value':'Wispr','aliases':['whisper'],'enabled':True,'source':'wispr-hint','updated_at':1}],
+          'snippets':[{'id':'3','kind':'snippet','name':'Adres','value':'Straat 1\n\nStad','aliases':['mijn adres'],'enabled':False,'source':'user','updated_at':1}]}
+    out=phone_library(data)
+    assert out=={'dictionary':[{'name':'Supabase','value':'Supabase','aliases':['superbase'],'enabled':True,'source':'user'}],
+                 'snippets':[{'name':'Adres','value':'Straat 1\n\nStad','aliases':['mijn adres'],'enabled':False,'source':'user'}]}

@@ -6,6 +6,7 @@ import numpy as np
 from scipy.signal import resample_poly
 from websockets.asyncio.client import connect
 import storage
+from local_runtime import ollama_spec
 from personalization import dictionary_replace,protect_snippets,restore_snippets,paragraph_layout,repair_spoken_words
 from limits import MAX_SECONDS,MAX_WAV_BYTES,MAX_TEXT_CHARS,FORMAT_CHUNK_CHARS,LIMIT_MESSAGE,split_format_text
 
@@ -106,6 +107,7 @@ IDLE_WAKE_SECONDS=45
 
 class LocalWorkers:
     def __init__(self):
+        self.local_model='local'
         self.processes={}; self.locks={n:asyncio.Lock() for n in ('parakeet','whisper','local')}; self.token=secrets.token_urlsafe(32);self.warmed=set()
         self.warm_locks={n:asyncio.Lock() for n in ('parakeet','whisper','local')};self.last_used={}
     def used(self,name):self.last_used[name]=time.monotonic()
@@ -121,25 +123,30 @@ class LocalWorkers:
             proc=self.processes.get(name)
             if proc is not None and proc.poll() is None: return url
             self.warmed.discard(name)
+            environment=None;health_path='/health'
             if name=='parakeet':
                 exe=self.executable('nemo','nemo-speech.exe')
                 args=[str(exe),'serve','--host','127.0.0.1','--port',str(port),'--asr-model',str(MODELS/'parakeet-tdt-0.6b-v3.q8_0.gguf'),'--device','cuda:0','--api-key',self.token,'--no-ui','--max-upload-mb','20']
             elif name=='local':
-                exe=self.executable('llama','llama-server.exe')
-                args=[str(exe),'-m',str(MODELS/'Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf'),'--host','127.0.0.1','--port',str(port),'-c','8192','-ngl','99','-np','1','--api-key',self.token,'--reasoning','off','--jinja',*SPECULATIVE_ARGS]
+                replacement=ollama_spec(ROOT,port)
+                if replacement:
+                    exe=replacement['exe'];args=replacement['args'];environment=replacement['env'];health_path=replacement['health'];self.local_model=replacement['model']
+                else:
+                    self.local_model='local';exe=self.executable('llama','llama-server.exe')
+                    args=[str(exe),'-m',str(MODELS/'Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf'),'--host','127.0.0.1','--port',str(port),'-c','8192','-ngl','99','-np','1','--api-key',self.token,'--reasoning','off','--jinja',*SPECULATIVE_ARGS]
             else:
                 exe=self.executable('whisper','whisper-server.exe')
                 args=[str(exe),'-m',str(MODELS/'ggml-large-v3-turbo-q5_0.bin'),'--host','127.0.0.1','--port',str(port),'-l','nl','-t','6','-fa','-mc','0','--request-path','/'+self.token]
             (ROOT/'logs').mkdir(exist_ok=True)
             log=(ROOT/'logs'/f'{APP_PORT}-{name}.log').open('ab')
-            try: proc=subprocess.Popen(args,cwd=exe.parent,stdout=log,stderr=log,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+            try: proc=subprocess.Popen(args,cwd=exe.parent,env=environment,stdout=log,stderr=log,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
             finally: log.close()
             self.processes[name]=proc
             async with httpx.AsyncClient(timeout=2,trust_env=False) as client:
                 for _ in range(120):
                     if proc.poll() is not None: raise RuntimeError(f'{name} startte niet. Zie de lokale runtimelog.')
                     try:
-                        health=url+('/'+self.token+'/' if name=='whisper' else '/health')
+                        health=url+('/'+self.token+'/' if name=='whisper' else health_path)
                         resp=await client.get(health,headers={'Authorization':'Bearer '+self.token})
                         if resp.status_code<500: return url
                     except httpx.HTTPError: pass
@@ -214,7 +221,7 @@ async def _format_text_base(text,engine='cloud-mini',style='bericht',debug=False
     if style!='letterlijk':text=repair_spoken_words(text)
     start=time.perf_counter()
     if engine=='local':
-        base=await workers.ensure('local'); key=workers.token; model='local'
+        base=await workers.ensure('local'); key=workers.token; model=workers.local_model
     elif engine=='openrouter-free':model='openrouter-free'
     else: base='https://api.openai.com'; key=api_key(); model=FORMAT_MODELS[engine]
     style_hint={'bericht':'Maak een natuurlijk leesbaar bericht. Behoud alle inhoud; maak er geen kortere samenvatting van.','notitie':'Maak een leesbare notitie; behoud alle inhoud en opsommingen.','letterlijk':'Stijl letterlijk: behoud alle woorden, ook versprekingen en voorbeeldwoorden; pas alleen interpunctie, hoofdletters en alinea-indeling aan.'}.get(style,'Maak een natuurlijk leesbaar bericht; behoud alle inhoud.')

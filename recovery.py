@@ -70,12 +70,13 @@ class RecoveryStore:
             metadata=self.metadata(key);metadata['completed']=True;metadata.pop('retry_id',None)
             self.write_metadata(metadata)
 
-    def retry_id(self,key):
+    def retry_id(self,key,config=None):
         with self.lock:
             metadata=self.metadata(key)
-            if metadata.get('retry_id'):return metadata['retry_id']
-            request_id=str(uuid.uuid4()) if metadata.get('completed') else key
-            metadata['retry_id']=request_id;self.write_metadata(metadata)
+            profile=metadata['config'] if config is None else config
+            if metadata.get('retry_id') and metadata.get('retry_profile',metadata['config'])==profile:return metadata['retry_id']
+            request_id=str(uuid.uuid4()) if metadata.get('completed') or profile!=metadata['config'] or metadata.get('retry_id') else key
+            metadata['retry_id']=request_id;metadata['retry_profile']=dict(profile);self.write_metadata(metadata)
             return request_id
 
     def ids(self):

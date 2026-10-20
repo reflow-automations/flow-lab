@@ -131,6 +131,7 @@ def main():
             import tkinter as tk
             from tkinter import ttk
             window=tk.Tk();window.title('Flow Lab starten');window.geometry('430x110');window.resizable(False,False)
+            window.iconbitmap(str(root/'assets/brand/flow-lab.ico'))
             window.protocol('WM_DELETE_WINDOW',window.withdraw)
             label=ttk.Label(window,padding=20,wraplength=390);label.pack(fill='both',expand=True)
         label.configure(text=message);window.update()

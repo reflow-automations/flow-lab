@@ -109,6 +109,14 @@ def test_transport_failure_keeps_recording_until_user_stops(monkeypatch,tmp_path
     assert any(e[0]=='error' for e in received)
     assert store.load(recorder.recording_id)[1]==b'\0\1'*100+b'\0\2'*100
 
+def test_recovery_profiles_have_separate_stable_request_ids(tmp_path):
+    store=RecoveryStore(tmp_path);key=str(uuid.uuid4());original=config();store.save(key,b'\0\1'*20,original)
+    first=store.retry_id(key);basic={**original,'engine':'parakeet','formatter':'verbatim'}
+    second=store.retry_id(key,basic)
+    assert first!=second and store.retry_id(key,basic)==second
+    assert store.load(key)[0]['config']==original
+    assert store.retry_id(key)!=second
+
 def test_retry_busy_keeps_audio_and_never_starts_microphone(monkeypatch,tmp_path):
     import httpx
     import desktop_helper as d

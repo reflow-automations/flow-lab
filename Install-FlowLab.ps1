@@ -32,7 +32,7 @@ foreach ($flowPath in $flowLinks) {
     $flowLink.WorkingDirectory = $flowRoot
     $flowLink.Description = 'Flow Lab - dicteren, snippets en woordenboek'
     $flowLink.WindowStyle = 7
-    $flowLink.IconLocation = (Join-Path $flowRoot 'assets/flow-lab.ico') + ',0'
+    $flowLink.IconLocation = (Join-Path $flowRoot 'assets/brand/flow-lab.ico') + ',0'
     $flowLink.Save()
     $flowCheck = $flowShell.CreateShortcut($flowPath)
     if ($flowCheck.TargetPath -ne $flowPythonWindow -or $flowCheck.Arguments -ne $flowArguments) {

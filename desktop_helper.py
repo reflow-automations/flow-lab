@@ -292,10 +292,9 @@ class Desktop:
 
     def make_tray(self):
         import pystray
-        from PIL import Image, ImageDraw
-        icon = Image.new('RGB', (64,64), '#163e34')
-        draw = ImageDraw.Draw(icon)
-        for i,h in enumerate([14,30,44,30,14]): draw.rounded_rectangle((12+i*9,32-h//2,17+i*9,32+h//2), radius=2, fill='#d5f0dd')
+        from PIL import Image
+        with Image.open(ROOT/'assets/brand/flow-lab-mark.png') as mark:
+            icon=mark.convert('RGBA').resize((64,64),Image.Resampling.LANCZOS)
         item = pystray.MenuItem
         def event(name, *args): return lambda *_: self.events.put((name, *args))
         self.tray = pystray.Icon('FlowLab', icon, 'Flow Lab: Ctrl+Shift+Spatie', pystray.Menu(
@@ -434,7 +433,7 @@ class Desktop:
         self.display('Geannuleerd')
         self.hide_later()
 
-    def retry_recording(self,recording_id):
+    def retry_recording(self,recording_id,without_ai=False):
         if self.state!='idle':return
         if getattr(self,'learner',None):self.learner.stop()
         self.ident+=1;ident=self.ident
@@ -448,9 +447,13 @@ class Desktop:
             self.recovery_store.active.add(recording_id)
             try:
                 metadata,pcm=self.recovery_store.load(recording_id)
-                request_id=self.recovery_store.retry_id(recording_id)
+                retry_config=dict(metadata['config'])
+                if without_ai:
+                    retry_config['engine']='whisper' if retry_config.get('engine')=='whisper' else 'parakeet'
+                    retry_config['formatter']='verbatim'
+                request_id=self.recovery_store.retry_id(recording_id,retry_config)
                 if metadata.get('partial'):self.events.put(('recovery_note',ident,'Dit is een gedeeltelijke opname na een microfoonfout.'))
-                response=httpx.post(URL+'/api/clip',params={**metadata['config'],'recording_id':request_id},
+                response=httpx.post(URL+'/api/clip',params={**retry_config,'recording_id':request_id},
                                     content=wav_bytes(pcm),headers={'Origin':URL,'Content-Type':'audio/wav'},
                                     timeout=SESSION_TIMEOUT_SECONDS,trust_env=False)
                 if response.status_code==409:raise RuntimeError('Er wordt nog verwerkt. De opname blijft bewaard; probeer later opnieuw.')
@@ -609,10 +612,10 @@ class Desktop:
                     if self.control_window and self.control_window.exists():
                         if args[0]=='stalled':self.control_window.learning_status.set('Leren gepauzeerd: dit tekstvak reageerde te langzaam. Herstart Flow Lab om opnieuw te proberen.')
                         elif self.config.get('auto_learn'):
-                            self.control_window.learning_status.set('Een correctie is geleerd of staat klaar als voorstel. Bekijk Recent geleerd.')
+                            self.control_window.learning_status.set('Een correctie is geleerd of staat klaar als voorstel. Bekijk Geleerd in het Flow Lab-venster.')
                             if self.control_window.notebook.select()==str(self.control_window.tabs['learning']):self.control_window.load_learning()
                     continue
-                if kind == 'retry_recording':self.retry_recording(args[0]);continue
+                if kind == 'retry_recording':self.retry_recording(args[0],bool(args[1]) if len(args)>1 else False);continue
                 if kind == 'discard_recording':
                     if self.state=='idle':
                         self.recovery_store.discard(args[0])
@@ -625,15 +628,15 @@ class Desktop:
                     if self.state!='idle':
                         if self.control_window:self.control_window.status.set('Rond eerst je opname af om instellingen te wijzigen.')
                         continue
-                    if data.get('formatter') not in ('local','cloud-mini','openrouter-free') or data.get('paragraphs') not in ('normaal','ruim','compact') or data.get('style') not in ('bericht','notitie','letterlijk'):continue
-                    self.config.update(data);self.config['engine']='parakeet' if data['formatter']=='local' else 'hybrid-parakeet'
+                    if data.get('formatter') not in ('local','verbatim','cloud-mini','openrouter-free') or data.get('paragraphs') not in ('normaal','ruim','compact') or data.get('style') not in ('bericht','notitie','letterlijk'):continue
+                    self.config.update(data);self.config['engine']='parakeet' if data['formatter'] in ('local','verbatim') else 'hybrid-parakeet'
                     CONFIG.write_text(json.dumps(self.config,indent=2),encoding='utf-8')
                     if self.control_window:self.control_window.status.set('Instellingen opgeslagen. Werkt bij je volgende dictaat.')
                     self.prewarm()
                     continue
                 if kind == 'mode':
-                    if args[0] not in ('local','cloud-mini','openrouter-free'):continue
-                    self.config['formatter']=args[0]; self.config['engine']='parakeet' if args[0]=='local' else 'hybrid-parakeet'
+                    if args[0] not in ('local','verbatim','cloud-mini','openrouter-free'):continue
+                    self.config['formatter']=args[0]; self.config['engine']='parakeet' if args[0] in ('local','verbatim') else 'hybrid-parakeet'
                     CONFIG.write_text(json.dumps(self.config, indent=2), encoding='utf-8'); self.prewarm(); continue
                 if kind == 'key':
                     if self.state=='idle':self.hotkeys.command('change',args[0])

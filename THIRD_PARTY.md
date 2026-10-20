@@ -46,3 +46,7 @@ en persoonlijke bibliotheken zijn geen onderdeel van deze broncode-export.
 
 Bronnen en geïnstalleerde pakketmetadata gecontroleerd op 15 oktober 2026.
 Dit overzicht geldt voor deze broncodedistributie, niet als volledige binaire SBOM.
+
+Het Flow Lab-woordmerk gebruikt Montserrat. De lettervormen zijn verwerkt in de
+meegeleverde logoafbeelding; de app installeert geen extra lettertype.
+De SIL Open Font License staat in assets/brand/OFL.txt.

@@ -15,6 +15,12 @@ if ($flowProcess.ExecutablePath -ne $flowExpected.Replace('/','\') -or $flowProc
     throw 'Het opgeslagen proces is niet de verwachte Flow Lab-server. Niets gestopt.'
 }
 $flowSnapshot = @(Get-CimInstance Win32_Process)
+$flowOllamaRoot=$null
+$flowRuntimeConfig=Join-Path $PSScriptRoot 'data/local-runtime.json'
+if (Test-Path -LiteralPath $flowRuntimeConfig) {
+    $flowRuntime=Get-Content -LiteralPath $flowRuntimeConfig -Encoding UTF8 | ConvertFrom-Json
+    if ($flowRuntime.backend -eq 'ollama') { $flowOllamaRoot=[System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($flowRuntime.executable)).TrimEnd('\')+'\' }
+}
 $flowOwned = [System.Collections.Generic.List[int]]::new()
 $flowOwned.Add($flowPid)
 for ($depth = 0; $depth -lt 4; $depth++) {
@@ -22,7 +28,8 @@ for ($depth = 0; $depth -lt 4; $depth++) {
         if ($flowOwned.Contains([int]$child.ProcessId) -or -not $flowOwned.Contains([int]$child.ParentProcessId)) { continue }
         $native = $child.ExecutablePath -and $child.ExecutablePath.StartsWith($flowRoot,[System.StringComparison]::OrdinalIgnoreCase) -and $child.Name -in @('nemo-speech.exe','llama-server.exe','whisper-server.exe')
         $interpreter = $child.Name -eq 'python.exe' -and $child.CommandLine -match 'uvicorn app:app.*17865'
-        if ($native -or $interpreter) { $flowOwned.Add([int]$child.ProcessId) }
+        $signedRuntime = $flowOllamaRoot -and $child.ExecutablePath -and $child.ExecutablePath.StartsWith($flowOllamaRoot,[System.StringComparison]::OrdinalIgnoreCase) -and $child.Name -in @('ollama.exe','llama-server.exe')
+        if ($native -or $interpreter -or $signedRuntime) { $flowOwned.Add([int]$child.ProcessId) }
     }
 }
 for ($index = $flowOwned.Count - 1; $index -ge 0; $index--) { Stop-Process -Id $flowOwned[$index] -ErrorAction SilentlyContinue }
