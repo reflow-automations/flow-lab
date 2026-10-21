@@ -1,5 +1,6 @@
 """Source publication checks. Inspect selected Git blobs, never private disk files."""
 import argparse
+import hashlib
 import json
 from pathlib import PurePosixPath
 import re
@@ -38,6 +39,12 @@ def validate_public_files(contents,allowed):
                 if json.loads(text).get('replacements')!={'webhoek':'webhook','superbase':'Supabase'}:
                     errors.append(name+': starter dictionary must remain generic')
             except ValueError:errors.append(name+': invalid JSON')
+    if 'SOURCE-MANIFEST.json' in contents:
+        try:
+            manifest=json.loads(contents['SOURCE-MANIFEST.json'].decode('utf-8'))
+            expected={name:hashlib.sha256(data).hexdigest() for name,data in contents.items() if name!='SOURCE-MANIFEST.json'}
+            if manifest!=expected:errors.append('SOURCE-MANIFEST.json: source hashes or file list are outdated')
+        except (ValueError,UnicodeDecodeError):errors.append('SOURCE-MANIFEST.json: invalid UTF-8 JSON')
     return errors
 
 def git(*args):return subprocess.check_output(['git',*args])

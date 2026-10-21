@@ -1,4 +1,6 @@
 from publication_guard import validate_public_files
+import hashlib,json
+import pytest
 
 def test_private_file_rejected_even_if_added_to_allowlist():
     assert validate_public_files({'data/personal.json':b'{}'},['data/personal.json'])
@@ -17,3 +19,13 @@ def test_only_empty_environment_example_allowed():
 
 def test_generic_source_allowed():
     assert not validate_public_files({'app.py':b'print("hello")'},['app.py'])
+
+def test_manifest_must_describe_actual_committed_sources():
+    data=b'print("example")'
+    manifest={'app.py':hashlib.sha256(data).hexdigest()}
+    assert not validate_public_files({'app.py':data,'SOURCE-MANIFEST.json':json.dumps(manifest).encode()},['app.py'])
+
+@pytest.mark.parametrize('manifest',[{}, {'app.py':'outdated'}, {'removed.py':'outdated'}])
+def test_stale_or_incomplete_manifest_blocks_publication(manifest):
+    errors=validate_public_files({'app.py':b'print("example")','SOURCE-MANIFEST.json':json.dumps(manifest).encode()},['app.py'])
+    assert any('SOURCE-MANIFEST.json' in error for error in errors)
