@@ -11,11 +11,11 @@
   "engines": {
     "hybrid-parakeet": {
       "title": "Lokale audio met keuze voor cloudopmaak",
-      "text": "Parakeet herkent op je GPU. In combinatie met GPT-4.1 mini-opmaak de beste balans in onze kleine proef. Alleen met een cloudformatter wordt de herkende tekst verstuurd; audio blijft lokaal."
+      "text": "Parakeet herkent lokaal via ONNX op je CPU. Alleen met een gekozen cloudformatter wordt de herkende tekst verstuurd; audio blijft lokaal. De oudere snelheidstabel beschrijft eerdere GPU-runtimes."
     },
     "parakeet": {
       "title": "Parakeet: snelle lokale eerste keuze",
-      "text": "Spraakherkenning op je eigen GPU, zonder audio-upload of API-kosten. Namen en vaktermen kunnen fout gaan; voeg correcties toe aan je woordenboek. Niet algemeen bewezen nauwkeuriger dan Whisper."
+      "text": "Lokale spraakherkenning via Microsoft ONNX Runtime op je CPU, zonder audio-upload of API-kosten. Namen en vaktermen kunnen fout gaan; voeg correcties toe aan je woordenboek. Niet algemeen bewezen nauwkeuriger dan Whisper."
     },
     "whisper": {
       "title": "Whisper Turbo: lokaal alternatief",

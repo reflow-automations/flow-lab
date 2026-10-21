@@ -282,7 +282,7 @@ class Desktop:
         main_visible=bool(control and control.exists() and control.root.state()!='withdrawn')
         main_panel=next((key for key,tab in control.tabs.items() if str(tab)==control.notebook.select()),None) if control and control.exists() else None
         learner=getattr(self,'learner',None)
-        STATE.write_text(json.dumps(dict(pid=os.getpid(), hwnd=self.hwnd, caption=self.caption, test=self.test, hotkey=self.config['hotkey'], registered=self.main_registered, replay_hotkey=self.replay_key, replay_registered=self.replay_registered, state=self.state, gesture=self.gesture.mode, controls='hold-double-tap', overlay_size=[156,36], ui='native-tk',main_window=main_hwnd,main_visible=main_visible,main_panel=main_panel,auto_learn=self.config.get('auto_learn',False),learning_stalled=bool(learner and learner.stalled)), indent=2), encoding='utf-8')
+        STATE.write_text(json.dumps(dict(pid=os.getpid(), hwnd=self.hwnd, caption=self.caption, test=self.test, hotkey=self.config['hotkey'], registered=self.main_registered, replay_hotkey=self.replay_key, replay_registered=self.replay_registered, state=self.state, gesture=self.gesture.mode, controls='hold-double-tap', overlay_size=[156,36], ui='native-tk',main_window=main_hwnd,main_visible=main_visible,main_panel=main_panel,auto_learn=self.config.get('auto_learn',False),learning_stalled=bool(learner and learner.stalled),learning_proposal_visible=bool(self.overlay.proposal),learning_proposal_kind=self.overlay.proposal['mode'] if self.overlay.proposal else None), indent=2), encoding='utf-8')
 
     def display(self, text):
         self.overlay.render(self.state,self.levels,self.gesture.mode=='locked')
@@ -479,7 +479,20 @@ class Desktop:
 
     def hide_later(self,delay_ms=3500):
         ident = self.ident
-        self.root.after(delay_ms, lambda: w.show(self.hwnd, 0) if self.ident==ident and not self.current else None)
+        self.root.after(delay_ms, lambda: w.show(self.hwnd, 0) if self.ident==ident and not self.current and not self.overlay.proposal else None)
+
+    def show_learning_proposal(self,proposal):
+        if self.state!='idle' or not self.learner.is_current(proposal) or w.foreground()!=proposal['hwnd']:return
+        self.overlay.offer(proposal,lambda p,a:self.events.put(('learning_review',p,a)))
+        self.display('')
+        def check():
+            if self.overlay.proposal is not proposal:return
+            if self.state!='idle' or not self.learner.is_current(proposal) or w.foreground()!=proposal['hwnd']:
+                self.overlay.clear_proposal()
+                if self.state=='idle':w.show(self.hwnd,0)
+                return
+            self.root.after(100,check)
+        self.root.after(100,check)
 
     def remember_status(self,message):
         self.last_insertion_message=message
@@ -615,11 +628,25 @@ class Desktop:
                     if self.control_window and self.control_window.exists():self.control_window.refresh_learning()
                     continue
                 if kind == 'learning_update':
+                    if isinstance(args[0],dict):
+                        notice=args[0]
+                        if notice['kind']=='proposal':self.show_learning_proposal(notice['proposal'])
+                        elif self.overlay.proposal is notice['proposal']:
+                            self.overlay.clear_proposal()
+                            if self.state=='idle':w.show(self.hwnd,0)
+                        continue
                     if self.control_window and self.control_window.exists():
                         if args[0]=='stalled':self.control_window.learning_status.set('Leren gepauzeerd: dit tekstvak reageerde te langzaam. Herstart Flow Lab om opnieuw te proberen.')
                         elif self.config.get('auto_learn'):
                             self.control_window.learning_status.set('Een correctie is geleerd of staat klaar als voorstel. Bekijk Geleerd in het Flow Lab-venster.')
                             if self.control_window.notebook.select()==str(self.control_window.tabs['learning']):self.control_window.load_learning()
+                    continue
+                if kind == 'learning_review':
+                    proposal,action=args
+                    if w.foreground()==proposal['hwnd']:self.learner.request_review(proposal,action)
+                    if self.overlay.proposal is proposal:
+                        self.overlay.clear_proposal()
+                        if self.state=='idle':w.show(self.hwnd,0)
                     continue
                 if kind == 'retry_recording':self.retry_recording(args[0],bool(args[1]) if len(args)>1 else False);continue
                 if kind == 'discard_recording':

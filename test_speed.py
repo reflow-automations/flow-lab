@@ -9,9 +9,11 @@ from desktop_helper import Desktop
 
 ORIGIN={'Origin':f'http://127.0.0.1:{engines.APP_PORT}'}
 
-def test_local_formatter_uses_lossless_ngram_speculation():
-    # Greedy decoding (temperature 0) keeps speculative output identical to normal output.
-    assert engines.SPECULATIVE_ARGS[:2]==['--spec-type','ngram-simple']
+def test_missing_local_formatter_never_launches_unsigned_llama(monkeypatch,tmp_path):
+    import pytest
+    monkeypatch.setattr(engines,'ROOT',tmp_path)
+    monkeypatch.setattr(engines.subprocess,'Popen',lambda *_a,**_k:(_ for _ in ()).throw(AssertionError('No unsigned runtime')))
+    with pytest.raises(RuntimeError,match='Ollama'):asyncio.run(engines.LocalWorkers().ensure('local'))
 
 def test_concurrent_prepare_warms_each_model_once(monkeypatch):
     calls=[]

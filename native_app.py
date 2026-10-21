@@ -29,7 +29,7 @@ def entry_payload(kind,identifier,name,value,aliases,enabled):
 def phone_library(data):
     """Library in the Android import format. Wispr spelling hints are skipped: the phone ignores them."""
     keep=('name','value','aliases','enabled','source')
-    return {kind:[{k:row[k] for k in keep if k in row} for row in data.get(kind,[]) if row.get('source')!='wispr-hint']
+    return {kind:[{k:row[k] for k in keep if k in row} for row in data.get(kind,[]) if row.get('source') not in ('wispr-hint','spelling-hint')]
             for kind in ('dictionary','snippets')}
 
 def set_text(widget,value):
@@ -312,7 +312,7 @@ class NativeApp:
 
     def build_learning(self):
         tab=self.tabs['learning']
-        page_header(tab,'Geleerd','Duidelijke correcties naar bekende namen worden onthouden. Nieuwe woorden vragen herhaling; twijfelgevallen blijven een voorstel.')
+        page_header(tab,'Geleerd','Bekende namen kunnen direct leren. Nieuwe namen vragen herhaling. Spellinghints en twijfelgevallen vragen jouw bevestiging.')
         self.learning_status=tk.StringVar(value='Correcties worden lokaal beoordeeld. Volledige tekstvelden worden niet opgeslagen.')
         ttk.Label(tab,textvariable=self.learning_status,style='PageMuted.TLabel',wraplength=800).pack(anchor='w',pady=(0,10))
         box=card(tab,expand=True)
@@ -341,7 +341,9 @@ class NativeApp:
             self.learning_tree.delete(*self.learning_tree.get_children())
             labels={'pending':'Voorstel','learned':'Onthouden','ignored':'Genegeerd','undone':'Ongedaan','withdrawn':'Teruggenomen','conflict':'Controle nodig','covered':'Staat al in woordenboek'}
             for row in data['items']:
-                self.learning_tree.insert('','end',iid=row['id'],values=(row['wrong'],row['right'],labels.get(row['state'],row['state']),row['observations']))
+                state=labels.get(row['state'],row['state'])
+                if row['mode']=='hint':state='Spellinghint onthouden' if row['state']=='learned' else 'Spellinghint voorstellen' if row['state']=='pending' else state
+                self.learning_tree.insert('','end',iid=row['id'],values=(row['wrong'],row['right'],state,row['observations']))
             if selection and selection[0] in self.learning_rows:self.learning_tree.selection_set(selection[0])
             self.learning_selection()
         self.request('/api/learning',loaded)
@@ -741,7 +743,7 @@ class LibraryEditor:
         if self.busy:return
         self.tree.delete(*self.tree.get_children());term=self.search.get().casefold()
         for row in self.rows.values():
-            if term in (row['name']+' '+' '.join(row['aliases'])).casefold():self.tree.insert('','end',iid=row['id'],values=(row['name']+(' (uit)' if not row['enabled'] else '')+(' (geleerd)' if row['source']=='auto-learn' else ''),))
+            if term in (row['name']+' '+' '.join(row['aliases'])).casefold():self.tree.insert('','end',iid=row['id'],values=(row['name']+(' (uit)' if not row['enabled'] else '')+(' (geleerd)' if row['source']=='auto-learn' else ' (spellinghint)' if row['source']=='spelling-hint' else ''),))
 
     def clear(self):
         if self.busy:return
@@ -756,7 +758,7 @@ class LibraryEditor:
         row=self.rows[selected[0]];self.identifier=row['id'];self.name.set(row['name'])
         set_text(self.value,row['value']);set_text(self.aliases,'\n'.join(row['aliases']));self.enabled.set(row['enabled'])
         self.title.set('Snippet bewerken' if self.kind=='snippet' else 'Woord bewerken')
-        self.hint.set('Spellinghint. Na zelf opslaan wordt dit een expliciete correctieregel.' if row['source']=='wispr-hint' else 'Witregels en volledige tekst blijven behouden.')
+        self.hint.set('Spellinghint voor het opmaakmodel, geen vaste vervanging. Voeg geen herkenningsvarianten toe tenzij je bewust een vaste regel wilt.' if row['source']=='spelling-hint' else 'Spellinghint. Na zelf opslaan wordt dit een expliciete correctieregel.' if row['source']=='wispr-hint' else 'Witregels en volledige tekst blijven behouden.')
 
     def lock(self,value):
         self.busy=value

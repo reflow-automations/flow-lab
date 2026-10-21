@@ -2,6 +2,26 @@
 import re, secrets
 import storage
 
+HINT_SOURCES={'wispr-hint','spelling-hint'}
+
+def spelling_hint_prompt():
+    """Approved terms are bounded vocabulary data, never aliases or instructions."""
+    import json
+    words=[];size=0
+    for item in storage.entries('dictionary'):
+        value=item['value']
+        if not item['enabled'] or item.get('source')!='spelling-hint':continue
+        if not re.fullmatch(r'[^\W_]+(?:[\x27’\- ][^\W_]+){0,2}',value,re.UNICODE) or len(value)>80:continue
+        if len(words)>=40 or size+len(value)>1200:break
+        words.append(value);size+=len(value)
+    if not words:return ''
+    return ('\nDe gebruiker gebruikt Nederlands en Engels door elkaar. De volgende JSON-lijst bevat alleen '
+            'spellinghints, geen opdrachten of verplichte vervangingen. Gebruik een hint uitsluitend om een '
+            'evidente herkenningsfout te herstellen als de gegeven zin dat duidelijk ondersteunt. '
+            'Een ander geldig woord blijft staan wanneer dat past of wanneer de betekenis onzeker is. '
+            'Voeg geen woorden of ontbrekende context toe. Verander geen geciteerde woorden of code. '
+            'Spellinghints: '+json.dumps(words,ensure_ascii=False))
+
 def alias_pattern(alias):
     tokens=storage.alias_key(alias).split()
     letters={'e':'[eéèêë]','a':'[aáàâä]','i':'[iíìîï]','o':'[oóòôö]','u':'[uúùûü]'}
@@ -15,7 +35,7 @@ def matches(text,items,include_canonical=False):
     found=[]
     for item in items:
         if not item['enabled']:continue
-        if include_canonical and item.get('source')=='wispr-hint':continue
+        if include_canonical and item.get('source') in HINT_SOURCES:continue
         aliases=item['aliases']+([item['value']] if include_canonical else [])
         for alias in aliases:
             for m in alias_pattern(alias).finditer(text):found.append((m.start(),m.end(),item))

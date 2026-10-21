@@ -7,7 +7,8 @@ from scipy.signal import resample_poly
 from websockets.asyncio.client import connect
 import storage
 from local_runtime import ollama_spec
-from personalization import dictionary_replace,protect_snippets,restore_snippets,paragraph_layout,repair_spoken_words
+from local_asr import OnnxParakeet,onnx_enabled
+from personalization import dictionary_replace,protect_snippets,restore_snippets,paragraph_layout,repair_spoken_words,spelling_hint_prompt
 from limits import MAX_SECONDS,MAX_WAV_BYTES,MAX_TEXT_CHARS,FORMAT_CHUNK_CHARS,LIMIT_MESSAGE,split_format_text
 
 ROOT=Path(__file__).resolve().parent
@@ -100,14 +101,12 @@ def conservative_layout(raw,text):
     text=re.sub(r'(^|\n\n)([a-zà-ÿ])',lambda m:m[1]+m[2].upper(),text)
     return clean_layout(text)
 
-# Formatter output mostly copies the transcript, so n-gram drafts from the prompt are
-# accepted often. Greedy decoding keeps the output identical; only the speed changes.
-SPECULATIVE_ARGS=['--spec-type','ngram-simple','--spec-ngram-simple-size-n','3','--spec-ngram-simple-size-m','24']
 IDLE_WAKE_SECONDS=45
 
 class LocalWorkers:
     def __init__(self):
         self.local_model='local'
+        self.onnx=None
         self.processes={}; self.locks={n:asyncio.Lock() for n in ('parakeet','whisper','local')}; self.token=secrets.token_urlsafe(32);self.warmed=set()
         self.warm_locks={n:asyncio.Lock() for n in ('parakeet','whisper','local')};self.last_used={}
     def used(self,name):self.last_used[name]=time.monotonic()
@@ -120,20 +119,20 @@ class LocalWorkers:
         ports={'parakeet':APP_PORT+1,'local':APP_PORT+2,'whisper':APP_PORT+3}; port=ports[name]
         url=f'http://127.0.0.1:{port}'
         async with self.locks[name]:
+            if name=='parakeet' and onnx_enabled(ROOT):
+                if self.onnx is None:self.onnx=OnnxParakeet(ROOT)
+                await asyncio.to_thread(self.onnx.ensure)
+                return 'inprocess://onnx-parakeet'
             proc=self.processes.get(name)
             if proc is not None and proc.poll() is None: return url
             self.warmed.discard(name)
             environment=None;health_path='/health'
-            if name=='parakeet':
-                exe=self.executable('nemo','nemo-speech.exe')
-                args=[str(exe),'serve','--host','127.0.0.1','--port',str(port),'--asr-model',str(MODELS/'parakeet-tdt-0.6b-v3.q8_0.gguf'),'--device','cuda:0','--api-key',self.token,'--no-ui','--max-upload-mb','20']
-            elif name=='local':
+            if name=='local':
                 replacement=ollama_spec(ROOT,port)
                 if replacement:
                     exe=replacement['exe'];args=replacement['args'];environment=replacement['env'];health_path=replacement['health'];self.local_model=replacement['model']
                 else:
-                    self.local_model='local';exe=self.executable('llama','llama-server.exe')
-                    args=[str(exe),'-m',str(MODELS/'Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf'),'--host','127.0.0.1','--port',str(port),'-c','8192','-ngl','99','-np','1','--api-key',self.token,'--reasoning','off','--jinja',*SPECULATIVE_ARGS]
+                    raise RuntimeError('Lokale Qwen-runtime ontbreekt. Installeer Ollama en voer Setup-FlowLab.ps1 -DownloadModels uit. Je opname blijft bewaard.')
             else:
                 exe=self.executable('whisper','whisper-server.exe')
                 args=[str(exe),'-m',str(MODELS/'ggml-large-v3-turbo-q5_0.bin'),'--host','127.0.0.1','--port',str(port),'-l','nl','-t','6','-fa','-mc','0','--request-path','/'+self.token]
@@ -153,6 +152,7 @@ class LocalWorkers:
                     await asyncio.sleep(.5)
             raise RuntimeError(f'{name} was niet op tijd gereed.')
     def close(self):
+        if self.onnx is not None:self.onnx.close()
         for proc in self.processes.values():
             if proc.poll() is None: proc.terminate()
         for proc in self.processes.values():
@@ -167,6 +167,10 @@ async def local_transcribe(pcm,engine):
     if engine not in ('parakeet','whisper'): raise ValueError('Onbekende lokale herkenner.')
     url=await workers.ensure(engine)
     audio=read_wav(pcm_wav(pcm),16000)
+    if engine=='parakeet' and url=='inprocess://onnx-parakeet':
+        result=await asyncio.to_thread(workers.onnx.recognize,audio)
+        workers.used(engine)
+        return result
     wav=pcm_wav(audio,16000)
     route='/v1/audio/transcriptions' if engine=='parakeet' else '/'+workers.token+'/inference'
     data={'language':'nl','response_format':'json','temperature':'0'}
@@ -226,7 +230,8 @@ async def _format_text_base(text,engine='cloud-mini',style='bericht',debug=False
     else: base='https://api.openai.com'; key=api_key(); model=FORMAT_MODELS[engine]
     style_hint={'bericht':'Maak een natuurlijk leesbaar bericht. Behoud alle inhoud; maak er geen kortere samenvatting van.','notitie':'Maak een leesbare notitie; behoud alle inhoud en opsommingen.','letterlijk':'Stijl letterlijk: behoud alle woorden, ook versprekingen en voorbeeldwoorden; pas alleen interpunctie, hoofdletters en alinea-indeling aan.'}.get(style,'Maak een natuurlijk leesbaar bericht; behoud alle inhoud.')
     protected_hint='\nBehoud elke FLOWLAB_..._END-markering exact één keer en ongewijzigd op zijn plek.' if re.search(r'FLOWLAB_[0-9A-F]{12}_\d+_END',text) else ''
-    payload={'model':model,'messages':[{'role':'system','content':PROMPT+'\n'+style_hint+protected_hint},{'role':'user','content':'<transcriptie>\n'+text+'\n</transcriptie>'}],'temperature':0,'max_tokens':min(3000,max(256,len(text)//2+200))}
+    vocabulary=spelling_hint_prompt() if style!='letterlijk' else ''
+    payload={'model':model,'messages':[{'role':'system','content':PROMPT+'\n'+style_hint+protected_hint+vocabulary},{'role':'user','content':'<transcriptie>\n'+text+'\n</transcriptie>'}],'temperature':0,'max_tokens':min(3000,max(256,len(text)//2+200))}
     if engine=='local':payload['chat_template_kwargs']={'enable_thinking':False}
     if engine=='openrouter-free':
         from openrouter_provider import complete

@@ -1,5 +1,5 @@
 """Download pinned public runtime/model artifacts, verify digests, never run installers."""
-import concurrent.futures, hashlib, json, urllib.request, zipfile
+import argparse, concurrent.futures, hashlib, json, urllib.request, zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -49,15 +49,21 @@ def model(repo, rev, filename):
     print('Ready model:', filename, flush=True)
     return {'kind':'model','repo':repo,'revision':rev,'file':filename,'sha256':h,'path':str(p)}
 
-if __name__=='__main__':
-    jobs=[
+def download_jobs(legacy=False):
+    qwen=(model,('bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF','ae44f08e1392f39c0e474af10c3ff8355c8b6688','Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf'))
+    if not legacy:return [qwen]
+    return [
         (runtime,('NVIDIA/NeMo-Speech.cpp','v0.2.0','windows-x86_64-cuda.zip','nemo')),
         (runtime,('ggml-org/llama.cpp','b11658','bin-win-vulkan-x64.zip','llama')),
         (runtime,('ggml-org/whisper.cpp','b5454','win-cuda-12.4.0-x64.zip','whisper')),
         (model,('nvidia/parakeet-tdt-0.6b-v3','541d1f99c6b0c3cd0b11a95167540bb8edefd82b','parakeet-tdt-0.6b-v3.q8_0.gguf')),
         (model,('ggerganov/whisper.cpp','5359861c739e955e79d9a303bcbc70fb988958b1','ggml-large-v3-turbo-q5_0.bin')),
-        (model,('bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF','ae44f08e1392f39c0e474af10c3ff8355c8b6688','Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf')),
+        qwen,
     ]
+
+if __name__=='__main__':
+    parser=argparse.ArgumentParser();parser.add_argument('--legacy-runtimes',action='store_true');args=parser.parse_args()
+    jobs=download_jobs(args.legacy_runtimes)
     results=[]
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         futures={pool.submit(f,*args):args for f,args in jobs}

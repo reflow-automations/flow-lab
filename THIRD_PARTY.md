@@ -50,3 +50,18 @@ Dit overzicht geldt voor deze broncodedistributie, niet als volledige binaire SB
 Het Flow Lab-woordmerk gebruikt Montserrat. De lettervormen zijn verwerkt in de
 meegeleverde logoafbeelding; de app installeert geen extra lettertype.
 De SIL Open Font License staat in assets/brand/OFL.txt.
+
+## Optionele Parakeet-ONNX-route
+
+- ONNX ASR 0.12.0: [MIT](https://github.com/istupakov/onnx-asr/blob/main/LICENSE).
+- Microsoft ONNX Runtime 1.31.0: [MIT](https://github.com/microsoft/onnxruntime/blob/main/LICENSE).
+- FlatBuffers 25.12.19: Apache-2.0; Protocol Buffers 7.36.2: BSD-3-Clause.
+- De INT8 ONNX-conversie van Parakeet v3 is gepubliceerd door Ivan Stupakov:
+  [model en conversie](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx).
+  Oorspronkelijk model: [NVIDIA Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3),
+  CC-BY-4.0. De conversie wijzigt formaat en quantisatie; vermeld bij herdistributie
+  zowel NVIDIA als de conversiebron en behoud de toepasselijke modellicentie.
+
+De bestanden worden niet in de broncode-export opgenomen. Revisie, hashes en
+versies staan in asr-onnx-lock.json en requirements.asr-onnx.txt. De oorspronkelijke
+NeMo/ggml-runtime wordt door deze aparte route niet geladen.

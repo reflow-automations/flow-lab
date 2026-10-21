@@ -15,6 +15,9 @@ def ollama_spec(root,port):
     if not exe.is_absolute() or not exe.is_file():raise RuntimeError('De ingestelde Ollama-installatie ontbreekt.')
     if hashlib.sha256(exe.read_bytes()).hexdigest()!=cfg.get('sha256'):
         raise RuntimeError('De lokale Ollama-installatie is gewijzigd. Controleer de installatie voor gebruik.')
+    return ollama_launch(root,port,exe)
+
+def ollama_launch(root,port,exe):
     env=os.environ.copy()
     env.update(OLLAMA_HOST=f'127.0.0.1:{port}',OLLAMA_MODELS=str(root/'models/ollama'),
                OLLAMA_NO_CLOUD='1',OLLAMA_KEEP_ALIVE='30m',OLLAMA_NUM_PARALLEL='1',

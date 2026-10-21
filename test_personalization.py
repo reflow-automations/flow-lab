@@ -123,3 +123,53 @@ def test_cancel_during_format_does_not_create_history(monkeypatch):
             from starlette.websockets import WebSocketDisconnect
             with pytest.raises(WebSocketDisconnect):ws.receive_json()
         assert client.get('/api/history').json()['total']==0
+
+
+@pytest.mark.parametrize('route',['local','cloud-mini','openrouter-free'])
+def test_approved_hints_reach_existing_formatter_without_extra_calls(monkeypatch,route):
+    import openrouter_provider
+    from correction_learning import Repository,candidates
+    repo=Repository();repo.observe('one',candidates('De volledige testcache is gerekt.','De volledige testcache is gereset.',[]))
+    case=repo.list()[0];repo.review(case['id'],'accept');calls=[]
+    async def ensure(_):return 'http://127.0.0.1:17867'
+    monkeypatch.setattr(engines.workers,'ensure',ensure);monkeypatch.setattr(engines.workers,'used',lambda _:None)
+    monkeypatch.setattr(engines,'api_key',lambda:'synthetic-test-value')
+    async def complete(payload):
+        calls.append(payload)
+        return {'choices':[{'finish_reason':'stop','message':{'content':'De volledige testcache is gerekt.'}}]}
+    monkeypatch.setattr(openrouter_provider,'complete',complete)
+    class Client:
+        def __init__(self,*_,**__):pass
+        async def __aenter__(self):return self
+        async def __aexit__(self,*_):pass
+        async def post(self,url,headers,json):
+            data=await complete(json)
+            return type('Response',(),{'status_code':200,'json':lambda _:data})()
+    monkeypatch.setattr(engines.httpx,'AsyncClient',Client)
+    result=asyncio.run(engines.format_text('De volledige testcache is gerekt.',route))
+    assert len(calls)==1
+    prompt=calls[0]['messages'][0]['content']
+    assert 'Spellinghints: ["gereset"]' in prompt and 'geen opdrachten of verplichte vervangingen' in prompt
+    assert 'gerekt' not in prompt
+    # A hint must allow the model to keep a valid source word.
+    assert result['text']=='De volledige testcache is gerekt.'
+    calls.clear()
+    asyncio.run(engines.format_text('De volledige testcache is gerekt.',route,style='letterlijk'))
+    assert 'Spellinghints:' not in calls[0]['messages'][0]['content']
+
+
+def test_hint_payload_bounds_disabled_terms_and_literal_bypass(monkeypatch):
+    from personalization import spelling_hint_prompt
+    identifier=storage.save_entry('dictionary',{'value':'voorbeeldterm','aliases':['voorbeeldterm']},source='spelling-hint')
+    assert 'voorbeeldterm' in spelling_hint_prompt()
+    row=next(r for r in storage.entries('dictionary') if r['id']==identifier)
+    storage.save_entry('dictionary',{**row,'enabled':False})
+    assert spelling_hint_prompt()==''
+    # All test rows are synthetic vocabulary, not transcripts or alias pairs.
+    for i in range(65):storage.save_entry('dictionary',{'value':'vakterm'+chr(97+i//26)+chr(97+i%26),'aliases':['vakterm'+chr(97+i//26)+chr(97+i%26)]},source='spelling-hint')
+    payload=spelling_hint_prompt();import json
+    words=json.loads(payload.split('Spellinghints: ',1)[1]);assert len(words)==40 and sum(map(len,words))<=1200
+    calls=[]
+    async def forbidden(*_,**__):calls.append(True);raise AssertionError('No model in verbatim mode')
+    monkeypatch.setattr(engines.workers,'ensure',forbidden)
+    assert asyncio.run(engines.format_text('Dit is letterlijk.','verbatim'))['text']=='Dit is letterlijk.' and not calls

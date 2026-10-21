@@ -108,14 +108,17 @@ def candidates(before,after,catalog):
         changed_wk=storage.alias_key(changed_wrong);changed_rk=storage.alias_key(changed_right)
         ratio=SequenceMatcher(None,changed_wk.replace(' ',''),changed_rk.replace(' ','')).ratio()
         ambiguous=changed_wrong.isupper() and len(changed_wrong)<=5 or len(changed_wk)<4 or ratio<.55
-        if known:mode='confirm' if ambiguous else 'auto'
+        if known and known.get('source')=='spelling-hint':mode='hint'
+        elif known:mode='confirm' if ambiguous else 'auto'
         elif correct[0].isupper() and len(rk)>=4:
             preceding=after[:new_start].rstrip()
             sentence_initial=not preceding or preceding[-1] in '.!?'
             mode='confirm' if ambiguous or sentence_initial else 'repeat'
+        elif len(right[k][0])>=4 and l-k==1 and not ambiguous:
+            mode='hint'
         else:continue
         results.append({'wrong':wrong,'right':known['value'] if known else correct,'mode':mode,'known_id':known['id'] if known else None,
-                        'reason':'Dubbelzinnige of korte variant' if ambiguous else 'Bekende schrijfwijze' if known else 'Nieuwe naam met woordcontext' if contextual else 'Nieuwe naam of term'})
+                        'reason':'Spellinghint, alleen na bevestiging; geen vaste vervanging' if mode=='hint' else 'Dubbelzinnige of korte variant' if ambiguous else 'Bekende schrijfwijze' if known else 'Nieuwe naam met woordcontext' if contextual else 'Nieuwe naam of term'})
     return results
 
 class Repository:
@@ -133,6 +136,11 @@ class Repository:
         if entry:
             if entry['value']!=row['right'] or (not explicit and entry['updated_at']!=row['entry_revision']):
                 c.execute("UPDATE learning_cases SET state='conflict',reason=?,updated_at=? WHERE id=?",('Woordenboek intussen gewijzigd; controleer de variant daar.',now,row['id']));return
+            if row['mode']=='hint':
+                if row['created_entry'] and entry['source']=='spelling-hint':c.execute('DELETE FROM entries WHERE id=?',(entry['id'],))
+                else:
+                    c.execute("UPDATE learning_cases SET state='conflict',reason=?,updated_at=? WHERE id=?",('Spellinghint intussen gewijzigd; controleer het woordenboek.',now,row['id']));return
+                c.execute('UPDATE learning_cases SET state=?,updated_at=? WHERE id=?',(state,now,row['id']));return
             aliases=json.loads(entry['aliases']);remaining=[a for a in aliases if a!=row['wrong']]
             if row['created_entry'] and not remaining and entry['source']=='auto-learn':c.execute('DELETE FROM entries WHERE id=?',(entry['id'],))
             else:
@@ -148,6 +156,14 @@ class Repository:
         entry=next((r for r in all_entries if storage.alias_key(r['value'])==row['right_key']),None)
         if row['target_id'] and (not entry or entry['id']!=row['target_id']):
             c.execute("UPDATE learning_cases SET state='conflict',reason=?,updated_at=? WHERE id=?",('Doelwoord is intussen gewijzigd. Controleer het woordenboek.',now,row['id']));return
+        if row['mode']=='hint':
+            if entry:
+                c.execute("UPDATE learning_cases SET state=?,updated_at=? WHERE id=?",('covered' if entry['enabled'] else 'conflict',now,row['id']));return
+            if any(row['right_key'] in [storage.alias_key(a) for a in item['aliases']] for item in all_entries):
+                c.execute("UPDATE learning_cases SET state='conflict',reason=?,updated_at=? WHERE id=?",('Woord hoort al bij een woordenboekregel.',now,row['id']));return
+            entry_id=str(uuid.uuid4())
+            c.execute('INSERT INTO entries VALUES(?,?,?,?,?,?,?,?)',(entry_id,'dictionary',row['right'],json.dumps([row['right']],ensure_ascii=False),row['right'],1,'spelling-hint',now))
+            c.execute("UPDATE learning_cases SET state='learned',entry_id=?,entry_revision=?,created_entry=1,updated_at=? WHERE id=?",(entry_id,now,now,row['id']));return
         if entry and (not entry['enabled'] or entry['source']=='wispr-hint'):return
         if any(row['wrong_key'] in [storage.alias_key(a) for a in item['aliases']] and (not entry or item['id']!=entry['id']) for item in all_entries):
             c.execute("UPDATE learning_cases SET state='conflict',reason=?,updated_at=? WHERE id=?",('Variant hoort al bij een andere woordenboekregel.',now,row['id']));return
@@ -178,12 +194,14 @@ class Repository:
                 c.execute('UPDATE learning_evidence SET active=0 WHERE case_id=? AND dictation_id=?',(row['id'],dictation_id))
                 count=c.execute('SELECT count(*) FROM learning_evidence WHERE case_id=? AND active=1',(row['id'],)).fetchone()[0]
                 if row['state']=='learned' and count<(2 if row['mode']=='repeat' else 1):self._undo(c,row,'withdrawn');changed.append(row['id'])
-                elif row['state']=='pending' and count==0:c.execute("UPDATE learning_cases SET state='withdrawn',updated_at=? WHERE id=?",(now,row['id']))
+                elif row['state']=='pending' and count==0:
+                    c.execute("UPDATE learning_cases SET state='withdrawn',updated_at=? WHERE id=?",(now,row['id']));changed.append(row['id'])
             for item in items:
                 wrong=item['wrong'];right=item['right'];wk=storage.alias_key(wrong);rk=storage.alias_key(right)
                 if not safe_phrase(wrong) or not safe_phrase(right) or wk==rk:continue
                 if c.execute('SELECT 1 FROM learning_blocks WHERE word_key IN (?,?)',(wk,rk)).fetchone():continue
                 row=c.execute('SELECT * FROM learning_cases WHERE wrong_key=? AND right_key=?',(wk,rk)).fetchone()
+                if not row and item['mode']=='hint' and c.execute("SELECT 1 FROM entries WHERE kind='dictionary' AND value=? AND source='spelling-hint' AND enabled=1",(right,)).fetchone():continue
                 if row and row['state'] in ('ignored','undone','conflict','covered'):continue
                 case_id=row['id'] if row else str(uuid.uuid4())
                 if not row:
@@ -199,15 +217,20 @@ class Repository:
                 c.rollback();return []
         return changed
 
-    def review(self,case_id,action):
+    def review(self,case_id,action,expected_revision=None,dictation_id=None,active=lambda:True):
         if action not in ('accept','ignore','undo'):raise ValueError('Onbekende leeractie.')
         with storage.connect() as c:
             c.execute('BEGIN IMMEDIATE')
             row=c.execute('SELECT * FROM learning_cases WHERE id=?',(case_id,)).fetchone()
             if not row:raise ValueError('Voorstel niet gevonden.')
+            if not active():raise ValueError('Voorstel is niet meer actief.')
+            if expected_revision is not None:
+                evidence=c.execute('SELECT 1 FROM learning_evidence WHERE case_id=? AND dictation_id=? AND active=1',(case_id,dictation_id)).fetchone()
+                if row['state']!='pending' or row['updated_at']!=expected_revision or not evidence:raise ValueError('Voorstel is intussen gewijzigd.')
             if action=='undo' and row['state']=='learned':self._undo(c,row,explicit=True)
             elif action=='ignore':
                 if row['state']=='learned':self._undo(c,row,'ignored',explicit=True)
                 else:c.execute("UPDATE learning_cases SET state='ignored',updated_at=? WHERE id=?",(time.time(),case_id))
             elif action=='accept' and row['state']!='learned':self._apply(c,row)
+            if not active():c.rollback();raise ValueError('Voorstel is niet meer actief.')
         return next((item for item in self.list() if item['id']==case_id),None)

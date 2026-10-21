@@ -16,7 +16,9 @@ jobs:
       - name: Check committed public files
         run: py publication_guard.py --git-ref HEAD
       - name: Install test dependencies
-        run: py -3.12 -m pip install -r requirements.lock.txt
+        run: py -3.12 -m pip install -r requirements.lock.txt -r requirements.asr-onnx.txt
+      - name: Check pinned signed ONNX runtime
+        run: py -3.12 -c "import sys,json; from pathlib import Path; from local_asr import checked_files; from runtime_trust import verify_publisher; native=Path(sys.prefix)/'Lib/site-packages/onnxruntime/capi'; checked_files(native,json.loads(Path('asr-onnx-lock.json').read_text(encoding='utf-8'))['windows_native']); verify_publisher(native,'CN=Microsoft Corporation,'); import onnxruntime; assert 'CPUExecutionProvider' in onnxruntime.get_available_providers()"
       - name: Test without microphone, cloud calls or model downloads
         run: py -3.12 -m pytest -q --tb=short
       - name: Check audio worklet

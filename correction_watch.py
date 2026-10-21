@@ -2,6 +2,7 @@
 import threading
 import time
 from correction_learning import WINDOW_SECONDS,QUIET_SECONDS,own_region,candidates
+POLL_SECONDS=.5
 
 class Session:
     def __init__(self,basis,started):
@@ -25,10 +26,26 @@ class Watcher:
     def __init__(self,worker_factory,snapshot,repository,enabled,notify):
         self.worker_factory=worker_factory;self.snapshot=snapshot;self.repository=repository
         self.enabled=enabled;self.notify=notify;self.worker=None;self.token=None;self.stalled=False
+        self.proposal=None;self.review_request=None
+
+    def is_current(self,proposal):
+        return bool(proposal and self.proposal is proposal and self.token is proposal['token']
+                    and not proposal['token'].is_set() and self.enabled()
+                    and time.monotonic()<proposal['expires_at'])
+
+    def clear_proposal(self):
+        old=self.proposal;self.proposal=None;self.review_request=None
+        if old:self.notify({'kind':'proposal_clear','proposal':old})
+
+    def request_review(self,proposal,action):
+        if action not in ('accept','ignore') or not self.is_current(proposal) or self.review_request:return False
+        self.review_request=(proposal,action)
+        return True
 
     def stop(self):
         if self.token:self.token.set()
         self.token=None
+        self.clear_proposal()
 
     def begin(self,hwnd,runtime,basis,dictation_id):
         self.stop()
@@ -44,12 +61,37 @@ class Watcher:
                     future=self.worker.submit(self.snapshot,hwnd,runtime)
                     snapshot=future.result(timeout=.4)
                     if not active():break
+                    current=own_region(basis,snapshot['text']) if snapshot else None
+                    if self.proposal and (current!=self.proposal['region'] or snapshot.get('composing') or not self.is_current(self.proposal)):
+                        self.clear_proposal()
                     state,region=session.sample(snapshot,time.monotonic())
                     if state=='stop':break
+                    requested=self.review_request;self.review_request=None
+                    if requested:
+                        proposal,action=requested
+                        if (self.is_current(proposal) and current==proposal['region'] and not snapshot.get('composing')
+                                and time.monotonic()-session.changed_at>=QUIET_SECONDS):
+                            try:
+                                self.repository.review(proposal['case_id'],action,expected_revision=proposal['revision'],
+                                                       dictation_id=dictation_id,active=lambda:active() and self.is_current(proposal))
+                                self.notify('changed')
+                            except ValueError:pass # A later revision or user decision wins.
+                        self.clear_proposal()
                     if state=='stable':
                         items=candidates(basis['original'],region,self.repository.catalog())
                         changes=self.repository.observe(dictation_id,items,active=active)
-                        if changes and active():self.notify('changed')
+                        if changes and active():
+                            self.notify('changed')
+                            rows=self.repository.list()
+                            pending=next((row for row in rows if row['id'] in changes and row['state']=='pending'),None)
+                            if pending:
+                                self.clear_proposal()
+                                proposal={'case_id':pending['id'],'revision':pending['updated_at'],'dictation_id':dictation_id,
+                                          'hwnd':hwnd,'runtime':runtime,'token':token,'region':region,'wrong':pending['wrong'],
+                                          'right':pending['right'],'mode':pending['mode'],
+                                          'expires_at':min(session.started+WINDOW_SECONDS,time.monotonic()+10)}
+                                self.proposal=proposal
+                                self.notify({'kind':'proposal','proposal':proposal})
                 except TimeoutError:
                     if future:future.cancel()
                     self.stalled=True
@@ -57,6 +99,7 @@ class Watcher:
                     break
                 except Exception:
                     break # Incompatible provider: learning stops without touching the text.
-                token.wait(.5)
+                token.wait(POLL_SECONDS)
             token.set()
+            if self.token is token:self.clear_proposal()
         threading.Thread(target=run,daemon=True).start()

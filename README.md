@@ -38,21 +38,85 @@ blijft beschikbaar in de app om te kopieren of bewust opnieuw te plaatsen.
 Wachtwoordvelden en alleen-lezenvelden zijn uitgesloten. Compatibiliteit met
 iedere app is niet gegarandeerd; een geslaagde proef bewijst het geteste veld.
 
+## Spellinghints na een correctie
+
+Met automatisch leren ingeschakeld kan een geschikte stabiele woordcorrectie
+een klein voorstelkaartje tonen. Kies **Onthouden** of **Niet leren**. Het kaartje
+neemt geen toetsenbordfocus over en sluit na ongeveer tien seconden. Niets doen
+keurt niets goed: het voorstel blijft beschikbaar bij **Geleerd**. Verder wijzigen,
+een ander tekstveld of een nieuwe dictatie maakt het oude kaartje ongeldig.
+
+Een nieuwe klein geschreven term wordt uitsluitend na bevestiging een
+**spellinghint**, zonder vaste vervanging van het oorspronkelijk herkende woord.
+Het bestaande opmaakmodel krijgt het gewenste woord mee en mag het alleen bij
+duidelijke zinscontext toepassen. Bij twijfel hoort het oorspronkelijke woord te
+blijven staan. Dit is geen modeltraining en garandeert geen foutloze herkenning.
+Bekende namen behouden hun bestaande leerregels; het kaartje vermeldt wanneer
+het om een vaste vervanging gaat. Hints en correcties zijn te beheren en ongedaan
+te maken in Geleerd en Woordenboek. Niet iedere wijziging is een leerkandidaat.
+
+Deze uitbreiding gebruikt dezelfde opmaakaanvraag, zonder extra AI-aanroep.
+Bij lokale opmaak blijven de hints op de pc; bij gekozen cloudopmaak gaan alleen
+bevestigde hints met die aanvraag mee. Letterlijke opmaak gebruikt deze hints niet.
+De bevestigingskaart en deze hintopslag zijn voor Windows. De telefoonexport
+laat deze hints weg zolang Android ze nog niet als hint kan behandelen.
+
+## Standaard lokale spraakruntime op Windows
+
+Als Windows Code Integrity een bestand van NeMo-Speech.cpp blokkeert, schakel dan
+geen beveiliging uit en probeer diezelfde DLL niet met een andere loader te laden.
+De standaardroute is Parakeet v3 via ONNX ASR en Microsoft ONNX
+Runtime. Deze route gebruikt andere modelbestanden en geen NeMo-Speech.exe of ggml.dll.
+
+Voor Windows x64 met de project-Python 3.12:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.asr-onnx.txt
+.\.venv\Scripts\python.exe setup_asr_onnx.py --enable
+```
+
+De installatie haalt ongeveer 670 MB vastgepinde Parakeet-ONNX-modelgegevens op,
+controleert hashes en op Windows de Microsoft-handtekeningen van de drie native
+ONNX Runtime-bestanden. Een afwijking verhindert activering. Start Flow Lab daarna
+opnieuw via het normale afsluit- en startmenu. De keuze staat uitsluitend in de
+lokale, van Git uitgesloten `data/local-asr-runtime.json`.
+
+Nieuwe installaties stellen deze route automatisch in met
+`Setup-FlowLab.ps1 -DownloadModels`. Ook zonder expliciet ASR-configuratiebestand
+kiest Parakeet ONNX. Een ontbrekend model geeft installatie-uitleg.
+
+Deze uitvoering draait op de CPU en blijft volledig lokaal. Tijdens dicteren
+wordt niets gedownload en bestaat geen automatische uitwijk naar cloud of naar de
+geblokkeerde runtime. Qwen-opmaak, woordenboek, snippets en sneltoets blijven behouden.
+Audio tot vijf minuten wordt in aaneensluitende delen van maximaal 24 seconden
+verwerkt, met voorkeur voor rustige knippunten. Elk sample gaat precies eenmaal
+naar de herkenner; herkenningskwaliteit rond een knippunt blijft iets om te testen.
+
+Op een enkele ontwikkel-pc kostte een warme fictieve proef van 4,5 seconden circa
+0,25 seconde voor herkenning, en circa 0,48 seconde inclusief lokale opmaak.
+Een synthetisch vijfminutenbestand kostte circa elf seconden voor herkenning.
+Dit zijn geen plaatsingstijden of garanties voor andere pc's. De eerste keer
+laden van herkenning en opmaak kan duidelijk langer duren.
+
 ## Gebruikt dit Ollama?
 
-Nee. Flow Lab start zelf lokale modelservers als subprocessen:
+Ja. Lokale Qwen-opmaak gebruikt een gecontroleerde Ollama-installatie en een eigen
+modelcache (`data/local-runtime.json`). Installeer vooraf de officiële
+[Windows-versie van Ollama](https://ollama.com/download/windows). Setup controleert
+de uitgevershandtekening en importeert het vastgepinde Qwen-model. De uitvoering
+blijft lokaal; een Ollama-cloudaccount is niet nodig. Parakeet draait via ONNX in
+het Python-proces. Ontbreekt de Qwen-configuratie, dan volgt installatie-uitleg.
 
 | Taak | Model | Uitvoering |
 | --- | --- | --- |
-| Lokale spraakherkenning | NVIDIA Parakeet TDT 0.6B v3 | NeMo-Speech.cpp, CUDA |
-| Lokale tekstopmaak | Qwen3-4B-Instruct-2507, Q4_K_M | llama.cpp, Vulkan |
-| Alternatieve lokale herkenning | Whisper large-v3-turbo, Q5 | whisper.cpp, CUDA |
+| Lokale spraakherkenning | NVIDIA Parakeet TDT 0.6B v3, ONNX INT8 | Microsoft ONNX Runtime, CPU |
+| Lokale tekstopmaak | Qwen3-4B-Instruct-2507, Q4_K_M | Ondertekende Ollama, eigen modelcache |
+| Experimentele alternatieve herkenning | Whisper large-v3-turbo, Q5 | Legacy whisper.cpp, CUDA, niet standaard geinstalleerd |
 | Optionele cloudopmaak | GPT-4.1 mini | Eigen OpenAI API-account |
 | Optionele cloudherkenning | OpenAI-transcriptiemodellen | Eigen OpenAI API-account |
 
-`llama.cpp` is de uitvoersoftware, niet het gebruikte taalmodel. Voor lokale
-opmaak is het model Qwen. Ollama hoeft niet geïnstalleerd te worden.
-Revisies en hashes staan in [model-lock.json](model-lock.json).
+Voor lokale opmaak is Qwen het model en Ollama de uitvoersoftware. Revisies en
+hashes staan in [model-lock.json](model-lock.json) en [asr-onnx-lock.json](asr-onnx-lock.json).
 
 ### Hulp bij kiezen
 
@@ -61,13 +125,12 @@ kies ik?** voor snelheid, kwaliteit, privacy en API-kosten. De optionele browser
 interface toont ook uitleg bij elke herkenner en formatter. De informatie komt
 voor beide interfaces uit `web/model-guide.json`.
 
-Begin met Parakeet + GPT-4.1 mini-opmaak als nette tekst het belangrijkst is.
-Kies Parakeet + lokale Qwen als alles op de pc moet blijven en je geen API-kosten
-wilt. De lokale formatter is experimenteel en kan inhoud wijzigen. Whisper is
+Standaard is Parakeet + lokale Qwen actief, zonder API-kosten. GPT-4.1 mini is een
+bewuste optionele cloudkeuze. De lokale formatter is experimenteel en kan inhoud wijzigen. Whisper is
 een lokaal alternatief om met dezelfde opname te vergelijken, geen bewezen
 algemene kwaliteitswinnaar.
 
-Een kleine synthetische proef op één GPU-pc gaf na einde audio, inclusief opmaak,
+Een historische synthetische proef van 15 oktober met de eerdere GPU-runtimes gaf na einde audio, inclusief opmaak,
 warme medianen van 0,55 s (Parakeet + Qwen, 3 runs), 0,70 s (Whisper + Qwen,
 3 runs) en 1,02 s (Parakeet + GPT-4.1 mini, 6 runs). De volledige cloudroutes
 met GPT-4.1 mini-opmaak zaten rond 3,74 tot 4,39 s mediaan (3 runs per route).
@@ -79,9 +142,10 @@ langer duren. Live tussentijdse tekst is niet hetzelfde als de snelste eindtekst
 
 - Windows 10/11 x64. Getest op één Windows-pc, niet op een brede hardwarematrix.
 - [CPython 3.12, 64-bit](https://www.python.org/downloads/windows/), inclusief Python Launcher en Tcl/Tk.
-- Voor de huidige lokale herkenningsroute: NVIDIA-GPU en passende CUDA-driver.
-  Qwen gebruikt Vulkan. CPU-only, AMD en Intel voor lokale herkenning zijn niet
-  uitgewerkt of geverifieerd in deze configuratie.
+- Voor lokale Qwen-opmaak: een actuele officiële Windows-installatie van Ollama.
+  Setup controleert de uitgever en importeert het vastgepinde Qwen-model.
+- Parakeet-herkenning gebruikt de CPU en vereist geen CUDA. Een geschikte GPU kan
+  Qwen versnellen. Andere hardware is nog niet breed praktisch getest.
 - Meerdere gigabytes vrije schijfruimte voor modellen, runtimes en downloadarchieven.
   De benodigde GPU-capaciteit hangt af van de gekozen route.
 - Microfoon en voor de browserinterface een actuele Chromium-browser.
@@ -96,7 +160,8 @@ Pak de broncode uit in een eigen map en open PowerShell in die map:
 # Python-pakketten in een eigen .venv installeren.
 .\Setup-FlowLab.ps1
 
-# Modellen en Windows-runtimes ophalen, dit zijn grote downloads.
+# Parakeet-ONNX en Qwen ophalen en lokaal instellen.
+# Installeer vooraf de officiële Windows-versie van Ollama.
 .\Setup-FlowLab.ps1 -DownloadModels
 
 # Maak een Flow Lab-icoon op het bureaublad en in het Startmenu.
@@ -107,16 +172,37 @@ Pak de broncode uit in een eigen map en open PowerShell in die map:
 ```
 
 Setup gebruikt `py -3.12` voor een nieuwe omgeving en daarna de interpreter in
-`.venv`. Een bestaande `.venv` wordt hergebruikt. De modeldownloads komen van
-GitHub en Hugging Face, worden gecontroleerd met SHA-256 en verschijnen in
-`model-manifest.json`. Een mislukte download geeft een foutstatus. Tijdens
-offlinegebruik worden ontbrekende modellen niet automatisch online opgehaald.
+`.venv`. Een bestaande `.venv` wordt hergebruikt; ontbrekende pip wordt met de
+standaard Python-bootstrap hersteld. ONNX-pakketten worden ook geïnstalleerd.
+Met `-DownloadModels` controleert setup eerst de Ollama-uitgever. Daarna haalt setup
+Parakeet-ONNX en het vastgepinde Qwen-GGUF op, controleert hashes/signaturen en
+importeert Qwen in een eigen cache. Die import gebruikt een tijdelijk eigen
+loopbackproces. De bestaande globale Ollama-service blijft buiten die installatie.
+NeMo/llama.cpp-runtimes worden standaard niet gedownload. Een mislukte controle
+stopt setup. Tijdens offlinegebruik worden ontbrekende modellen niet opgehaald.
 
 Blokkeert Windows of organisatiebeleid een script/executable, bekijk de concrete
 melding. Flow Lab schakelt geen beveiliging of execution policy uit.
 
 Voor alleen cloudherkenning in de browser kun je modeldownloads overslaan.
 De desktophelper gebruikt lokale audioherkenning en heeft de lokale herkenner nodig.
+
+### Bestaande installatie bijwerken
+
+Haal de nieuwe broncode op en behoud je eigen `data/`, `.env.local` en modellen.
+Sluit Flow Lab eerst volledig via het appmenu en voer opnieuw uit:
+
+```powershell
+.\Setup-FlowLab.ps1 -DownloadModels
+.\Start-FlowLab.cmd
+```
+
+Dit migreert naar ONNX en de gecontroleerde lokale Ollama-route. Een ongewijzigde
+modelcache wordt hergebruikt. Woordenboek, snippets, geschiedenis, sneltoetsen en
+API-sleutels worden niet door voorbeelddata vervangen. Als Ollama niet automatisch
+wordt gevonden, geef de exacte geinstalleerde `ollama.exe` mee met `-OllamaPath`.
+Deze versie heeft geen automatische updater: een GitHub-update installeert
+zichzelf niet op andere computers.
 
 ### Optionele cloudfuncties
 
@@ -190,13 +276,12 @@ altijd een kopie, ook wanneer invoegen niet lukt. De status erboven vermeldt of
 plaatsing bevestigd is, met de tijd vanaf stoppen/loslaten tot die bevestiging.
 Dit is iets anders dan alleen de rekentijd van herkenning en opmaak. De
 desktophelper laadt de gekozen lokale modellen direct bij het starten op de
-achtergrond, zodat de eerste opname niet op het laden wacht. Een model dat even
-niet gebruikt is, wordt tijdens het spreken alvast gewekt. De lokale opmaak
-gebruikt n-gram speculative decoding van llama.cpp: de opgemaakte tekst lijkt
-sterk op de invoer, dus het model kan stukken vooruit voorspellen. Met
-temperatuur 0 blijft de uitkomst gelijk; in een kleine synthetische proef was
-opmaken twee tot drie keer sneller. Duurt laden toch langer, dan verschijnt een
-laadmelding; de opname blijft ondertussen in geheugen.
+achtergrond. De eerste opname kan desondanks op modelinitialisatie wachten.
+Een model dat even niet gebruikt is, wordt tijdens het spreken alvast gewekt.
+De standaardopmaak gebruikt lokale Ollama. De oudere metingen met llama.cpp en
+n-gram speculative decoding beschrijven die eerdere ontwikkelroute, niet de
+huidige standaard. Duurt laden langer, dan verschijnt een laadmelding;
+de opname blijft ondertussen bewaard voor verwerking.
 
 Een leeg chatveld met hinttekst (zoals "Antwoord...") geeft die hinttekst soms
 als inhoud door. Staat na het plakken precies de dictatie in het veld, dan meldt

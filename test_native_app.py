@@ -82,7 +82,8 @@ def test_native_window_library_history_roundtrip(monkeypatch,tk_window,formatter
 
 def test_phone_library_export_matches_android_format():
     data={'dictionary':[{'id':'1','kind':'dictionary','name':'Supabase','value':'Supabase','aliases':['superbase'],'enabled':True,'source':'user','updated_at':1},
-                        {'id':'2','kind':'dictionary','name':'Wispr','value':'Wispr','aliases':['whisper'],'enabled':True,'source':'wispr-hint','updated_at':1}],
+                        {'id':'2','kind':'dictionary','name':'Wispr','value':'Wispr','aliases':['whisper'],'enabled':True,'source':'wispr-hint','updated_at':1},
+                        {'id':'4','kind':'dictionary','name':'vakterm','value':'vakterm','aliases':['vakterm'],'enabled':True,'source':'spelling-hint','updated_at':1}],
           'snippets':[{'id':'3','kind':'snippet','name':'Adres','value':'Straat 1\n\nStad','aliases':['mijn adres'],'enabled':False,'source':'user','updated_at':1}]}
     out=phone_library(data)
     assert out=={'dictionary':[{'name':'Supabase','value':'Supabase','aliases':['superbase'],'enabled':True,'source':'user'}],
@@ -146,3 +147,53 @@ def test_openrouter_key_shortlist_and_saved_model_probe(monkeypatch,tk_window):
         assert str(window.router_key_save['state'])=='disabled'
         assert 'Fictieve providerfout' in window.router_status.get()
     finally:window.root.destroy()
+
+
+def test_learning_card_does_not_request_focus_and_routes_clicks(tk_window):
+    from compact_overlay import CompactOverlay
+    from types import SimpleNamespace as NS
+    root=tk_window;calls=[];overlay=CompactOverlay(root,lambda:None,lambda:None,lambda:None)
+    proposal={'wrong':'gerekt','right':'gereset','mode':'hint'}
+    overlay.offer(proposal,lambda p,a:calls.append((p,a)))
+    root.update_idletasks()
+    assert overlay.width==420 and overlay.height==154
+    texts=[overlay.canvas.itemcget(item,'text') for item in overlay.canvas.find_all() if overlay.canvas.type(item)=='text']
+    assert 'Geen vaste vervanging' in texts and 'gereset' in texts
+    overlay.click(NS(x=80,y=90));assert calls==[(proposal,'accept')]
+    overlay.click(NS(x=260,y=90));assert calls[-1]==(proposal,'ignore')
+    overlay.render('recording',[])
+    assert overlay.proposal is None
+
+
+def test_proposal_stays_fixed_during_hover_idle_ticks_and_closes_once(tk_window):
+    from compact_overlay import CompactOverlay
+    root=tk_window;overlay=CompactOverlay(root,lambda:None,lambda:None,lambda:None)
+    overlay.set_hover(True)
+    proposal={'wrong':'gerekt','right':'gereset','mode':'hint'}
+    positions=[];geometry=root.geometry
+    def record_geometry(value=None):
+        if value is not None:positions.append(value)
+        return geometry(value) if value is not None else geometry()
+    root.geometry=record_geometry
+    overlay.offer(proposal,lambda *_:None);overlay.render('idle',[])
+    items=overlay.canvas.find_all();position=root.geometry()
+    for _ in range(10):
+        overlay.set_hover(True);overlay.render('idle',[.8,.3]);overlay.set_hover(False)
+        overlay.configure(text='');overlay.layout()
+    assert overlay.canvas.find_all()==items
+    assert len(positions)==1 and positions[0].startswith('420x154+')
+    assert root.geometry()==position and not overlay.hover
+    overlay.clear_proposal()
+    assert len(positions)==2 and positions[-1].startswith('156x36+')
+    assert all(not item.startswith('350x') for item in positions)
+
+
+def test_idle_status_changes_still_draw_and_processing_keeps_animating(tk_window):
+    from compact_overlay import CompactOverlay
+    overlay=CompactOverlay(tk_window,lambda:None,lambda:None,lambda:None)
+    overlay.render('idle',[]);old=overlay.canvas.find_all()
+    overlay.configure(text='Een controlebericht')
+    assert overlay.canvas.find_all()!=old
+    old=overlay.canvas.find_all();overlay.render('processing',[])
+    first=overlay.canvas.find_all();overlay.render('processing',[])
+    assert first!=old and overlay.canvas.find_all()!=first

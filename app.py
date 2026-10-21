@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from engines import ROOT, APP_PORT, ASR_MODELS, FORMAT_MODELS, MAX_SECONDS, CloudStream, workers, format_text, local_transcribe, run_clip, read_wav, silent,prepare_local,wake_local
 import storage
 from personalization import snippet_preview
+from local_asr import model_present
 from limits import MAX_WAV_BYTES,MAX_TEXT_CHARS,LIMIT_MESSAGE
 import openrouter_provider
 
@@ -45,7 +46,7 @@ async def index():return FileResponse(ROOT/'web/index.html')
 
 @app.get('/api/status')
 async def status():
-    return {'app':'flow-lab','cloud_configured':(ROOT/'.env.local').is_file(),'local_installed':all((ROOT/'models'/n).exists() for n in ['parakeet-tdt-0.6b-v3.q8_0.gguf','ggml-large-v3-turbo-q5_0.bin','Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf']),'busy':gate.locked(),'version':'0.2.0','max_seconds':MAX_SECONDS,'history_days':storage.RETENTION_DAYS}
+    return {'app':'flow-lab','cloud_configured':(ROOT/'.env.local').is_file(),'local_installed':model_present(ROOT) and (ROOT/'data/local-runtime.json').is_file(),'busy':gate.locked(),'version':'0.2.0','max_seconds':MAX_SECONDS,'history_days':storage.RETENTION_DAYS,'local_asr_backend':'onnx-cpu'}
 
 class TextInput(BaseModel):
     text:str=Field(max_length=MAX_TEXT_CHARS)

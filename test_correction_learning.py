@@ -71,7 +71,11 @@ def test_existing_compound_name_learns_only_the_whole_name_alias():
     ('Ik bel Merona niet morgen.','Ik bel Merona wel morgen.'),
 ])
 def test_name_context_does_not_learn_ordinary_words_quotes_or_sentence_boundaries(before,after):
-    assert candidates(before,after,[])==[]
+    items=candidates(before,after,[])
+    assert all(item['mode']=='hint' and item['wrong']=='pakket' for item in items)
+    repo=Repository();repo.observe('one',items);repo.observe('two',items)
+    assert not any(row['state']=='learned' for row in repo.list())
+    assert not any(row['value']=='Merona parket' for row in storage.entries('dictionary'))
 
 def test_acronym_is_a_proposal_and_can_be_accepted():
     name();repo=Repository();items=change('Ik spreek XYZ morgen.','Ik spreek Lunaro morgen.')
@@ -235,3 +239,111 @@ def test_stopping_watcher_cancels_pending_observation():
     watch.stop();future.set_result({'text':'Lunaro'})
     time.sleep(.02)
     assert calls==[]
+
+
+def test_lowercase_correction_requires_confirmation_and_never_replaces_source():
+    from personalization import dictionary_replace,spelling_hint_prompt
+    repo=Repository();before='De testcache is gerekt.';after='De testcache is gereset.'
+    items=candidates(before,after,repo.catalog())
+    assert len(items)==1 and items[0]['mode']=='hint'
+    repo.observe('one',items);repo.observe('two',items)
+    case=repo.list()[0];assert case['state']=='pending'
+    assert 'gereset' not in spelling_hint_prompt()
+    repo.review(case['id'],'accept')
+    entry=next(e for e in storage.entries('dictionary') if e['source']=='spelling-hint')
+    assert entry['value']=='gereset' and entry['aliases']==['gereset']
+    assert dictionary_replace('Dit papier is gerekt.')=='Dit papier is gerekt.'
+    assert 'gereset' in spelling_hint_prompt()
+    # A later stable revision of the SAME correction must not retract its own hint.
+    repo.observe('two',candidates(before,after+' Morgen testen.',repo.catalog()))
+    assert repo.list()[0]['state']=='learned' and 'gereset' in spelling_hint_prompt()
+    repo.review(case['id'],'undo')
+    assert 'gereset' not in spelling_hint_prompt()
+
+
+def test_hint_revision_invalidates_old_receipt_without_a_replacement_chain():
+    repo=Repository();before='De testcache is gerekt.'
+    repo.observe('one',candidates(before,'De testcache is geresit.',[]))
+    old=repo.list()[0]
+    repo.observe('one',candidates(before,'De testcache is gereset.',[]))
+    with pytest.raises(ValueError):repo.review(old['id'],'accept',expected_revision=old['updated_at'],dictation_id='one')
+    new=next(r for r in repo.list() if r['right']=='gereset')
+    assert new['wrong']=='gerekt' and new['state']=='pending'
+    repo.review(new['id'],'accept',expected_revision=new['updated_at'],dictation_id='one')
+    assert [e['value'] for e in storage.entries('dictionary') if e['source']=='spelling-hint']==['gereset']
+    repo.observe('one',[])
+    assert not any(e['source']=='spelling-hint' for e in storage.entries('dictionary'))
+
+
+def test_ignored_hint_and_manual_edits_are_respected():
+    repo=Repository();items=candidates('De testcache is gerekt.','De testcache is gereset.',[])
+    repo.observe('one',items);case=repo.list()[0];repo.review(case['id'],'ignore')
+    repo.observe('two',items);assert repo.list()[0]['state']=='ignored'
+    assert not any(e['source']=='spelling-hint' for e in storage.entries('dictionary'))
+    repo.review(case['id'],'accept')
+    entry=next(e for e in storage.entries('dictionary') if e['source']=='spelling-hint')
+    storage.save_entry('dictionary',{**entry,'value':'geresetted','aliases':['geresetted']})
+    changed=next(e for e in storage.entries('dictionary') if e['id']==entry['id'])
+    assert changed['source']=='spelling-hint'
+    repo.observe('one',[])
+    assert repo.list()[0]['state']=='conflict'
+    assert next(e for e in storage.entries('dictionary') if e['id']==entry['id'])['value']=='geresetted'
+
+
+def test_popup_review_transaction_rolls_back_if_session_stops():
+    repo=Repository();repo.observe('one',candidates('De testcache is gerekt.','De testcache is gereset.',[]))
+    case=repo.list()[0];checks=iter([True,False])
+    with pytest.raises(ValueError):repo.review(case['id'],'accept',expected_revision=case['updated_at'],dictation_id='one',active=lambda:next(checks))
+    assert repo.list()[0]['state']=='pending'
+    assert not any(e['source']=='spelling-hint' for e in storage.entries('dictionary'))
+
+
+def watch_fixture(monkeypatch):
+    import correction_watch as module
+    monkeypatch.setattr(module,'POLL_SECONDS',.01);monkeypatch.setattr(module,'QUIET_SECONDS',.02)
+    state={'text':'De testcache is gerekt.'};notices=queue.Queue()
+    def submit(fn,*args):
+        future=Future();future.set_result({'text':state['text']} if state['text'] is not None else None);return future
+    repo=Repository();watch=Watcher(lambda:NS(submit=submit),lambda *_:None,repo,lambda:True,notices.put)
+    watch.begin(10,(2,),{'original':state['text'],'prefix':'','suffix':''},'one')
+    state['text']='De testcache is gereset.'
+    deadline=time.monotonic()+2
+    while time.monotonic()<deadline:
+        notice=notices.get(timeout=2)
+        if isinstance(notice,dict) and notice['kind']=='proposal':return watch,repo,state,notice['proposal']
+    raise AssertionError('No proposal')
+
+
+def test_watcher_confirms_only_a_fresh_read_of_the_same_stable_edit(monkeypatch):
+    watch,repo,state,proposal=watch_fixture(monkeypatch)
+    try:
+        assert watch.request_review(proposal,'accept')
+        deadline=time.monotonic()+2
+        while time.monotonic()<deadline and repo.list()[0]['state']!='learned':time.sleep(.01)
+        assert repo.list()[0]['state']=='learned' and watch.proposal is None
+    finally:watch.stop()
+
+
+@pytest.mark.parametrize('replacement',[None,'De testcache is geresit.','De testcache is gerekt.'])
+def test_watcher_rejects_click_after_field_loss_edit_or_undo(monkeypatch,replacement):
+    watch,repo,state,proposal=watch_fixture(monkeypatch)
+    try:
+        state['text']=replacement
+        assert watch.request_review(proposal,'accept')
+        deadline=time.monotonic()+2
+        while time.monotonic()<deadline and watch.proposal is proposal:time.sleep(.01)
+        assert not any(e['source']=='spelling-hint' for e in storage.entries('dictionary'))
+        assert not watch.request_review(proposal,'accept')
+    finally:watch.stop()
+
+
+def test_expired_popup_keeps_pending_case_without_learning(monkeypatch):
+    watch,repo,state,proposal=watch_fixture(monkeypatch)
+    try:
+        proposal['expires_at']=time.monotonic()-1
+        assert not watch.request_review(proposal,'accept')
+        deadline=time.monotonic()+1
+        while time.monotonic()<deadline and watch.proposal is proposal:time.sleep(.01)
+        assert repo.list()[0]['state']=='pending'
+        assert not any(e['source']=='spelling-hint' for e in storage.entries('dictionary'))
+    finally:watch.stop()

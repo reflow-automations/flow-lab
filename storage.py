@@ -66,6 +66,7 @@ def save_entry(kind,data,source='user'):
             for row in c.execute('SELECT id,name,aliases FROM entries WHERE kind=? AND enabled=1 AND id<>?',(kind,identifier)):
                 if wanted.intersection(alias_key(a) for a in json.loads(row['aliases'])):raise ValueError('Een variant wordt al gebruikt door '+row['name']+'.')
         effective_source=source if source=='user' else (prior['source'] if prior and prior['source']=='user' else source)
+        if prior and prior['source']=='spelling-hint' and wanted=={alias_key(value)}:effective_source='spelling-hint'
         if kind=='dictionary' and source=='user':
             prior_keys={alias_key(a) for a in json.loads(prior['aliases'])} if prior else set()
             removed=prior_keys-wanted
