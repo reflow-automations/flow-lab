@@ -48,8 +48,21 @@ def test_start_timeout_is_bounded_and_leaves_failure_trace(monkeypatch,tmp_path)
     monkeypatch.setattr(launcher,'start_child',lambda *_:(_ for _ in ()).throw(AssertionError('Do not start another server')))
     with pytest.raises(TimeoutError):launcher.launch(tmp_path,True)
     result=json.loads((tmp_path/'logs/launcher-last-run.json').read_text())
-    assert not result['ok'] and 45000<=result['elapsed_ms']<46000
+    assert not result['ok'] and 120000<=result['elapsed_ms']<121000
     assert result['phases'][-1]['name']=='failed'
+
+def test_backend_that_dies_during_cold_start_fails_fast(monkeypatch,tmp_path):
+    clock=[0];messages=[]
+    monkeypatch.setattr(launcher.time,'monotonic',lambda:clock[0])
+    monkeypatch.setattr(launcher.time,'sleep',lambda amount:clock.__setitem__(0,clock[0]+amount))
+    monkeypatch.setattr(launcher,'service_status',lambda:None)
+    monkeypatch.setattr(launcher,'port_open',lambda:False)
+    exits=iter([None]*200+[1]*10)
+    monkeypatch.setattr(launcher,'start_child',lambda *_:NS(pid=42,poll=lambda:next(exits)))
+    with pytest.raises(RuntimeError,match='app-17865.stderr.log'):launcher.launch(tmp_path,True,messages.append)
+    result=json.loads((tmp_path/'logs/launcher-last-run.json').read_text())
+    assert result['elapsed_ms']<35000
+    assert any('Even geduld' in message for message in messages)
 
 def test_second_click_does_not_replace_first_launch_trace(monkeypatch,tmp_path):
     (tmp_path/'logs').mkdir();prior=tmp_path/'logs/launcher-last-run.json';prior.write_text('first run')

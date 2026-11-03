@@ -28,12 +28,17 @@ VK_MOD={0x10:4,0xA0:4,0xA1:4,0x11:2,0xA2:2,0xA3:2,0x12:1,0xA4:1,0xA5:1,0x5B:8,0x
 
 class ShortcutEdges:
     """Report physical chord down/up/cancel; never store text or repeat events."""
-    def __init__(self,mask,key=0):
+    def __init__(self,mask,key=0,physical=None):
         self.mask=mask;self.key=key;self.down=set();self.active=False;self.blocked=False
+        self.physical=physical
 
     def feed(self,vk,is_down,injected=False):
         if injected:return None
         was_active=self.active
+        # A missed key-up (lock screen, UAC) would otherwise block the shortcut until restart.
+        if is_down and self.physical:
+            self.down={k for k in self.down if self.physical(k)}
+            if not self.down:self.blocked=False
         if is_down:self.down.add(vk)
         else:self.down.discard(vk)
         present=0

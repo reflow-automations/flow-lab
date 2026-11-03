@@ -1,3 +1,5 @@
+import ctypes as C
+import queue
 import threading
 from types import SimpleNamespace as NS
 import pytest
@@ -57,6 +59,30 @@ def test_regular_shortcut_release_can_be_repeated_while_modifier_held():
     assert edge.feed(0x44,False)=='up'
     assert edge.feed(0x44,True)=='down'
     assert edge.feed(0x44,False)=='up'
+
+def test_missed_key_release_does_not_block_shortcut_forever():
+    held={0x5B,0x4C}
+    edge=ShortcutEdges(10,physical=lambda k:k in held)
+    assert edge.feed(0x5B,True) is None and edge.feed(0x4C,True) is None
+    held.clear()  # Win+L: the releases go to the lock screen, the hook never sees them
+    assert edge.feed(0xA2,True) is None;held.add(0xA2)
+    assert edge.feed(0x5B,True)=='down'
+
+def test_device_key_stuck_down_is_not_seeded(monkeypatch):
+    import desktop_windows as w
+    stuck={0x64,0x65};pressed=set()
+    monkeypatch.setattr(w,'key_state',lambda k:-32768 if k in stuck|pressed else 0)
+    monkeypatch.setattr(w,'register',lambda *_:True)
+    chords=[]
+    monkeypatch.setattr(w,'_set_hook',lambda kind,callback,*_:chords.append(callback) or 1)
+    hotkeys=w.Hotkeys.__new__(w.Hotkeys);hotkeys.events=queue.Queue();hotkeys.registered=False;hotkeys.key=None
+    assert hotkeys.activate('ctrl-win')
+    monkeypatch.setattr(w,'_next_hook',lambda *_:0)
+    def press(vk,down):
+        item=w.KBDLL(vk,0,0,0,0);chords[0](0,0x100 if down else 0x101,C.addressof(item))
+        if down:pressed.add(vk)
+    press(0xA2,True);press(0x5B,True)
+    assert hotkeys.events.get_nowait()[:2]==('gesture','down')
 
 def test_injected_edges_ignored():
     edge=ShortcutEdges(10)

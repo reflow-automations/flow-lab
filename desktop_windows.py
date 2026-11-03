@@ -4,7 +4,7 @@ from ctypes import wintypes as W
 import hashlib,queue,threading,time
 from concurrent.futures import Future
 from dataclasses import dataclass,field
-from shortcut_config import shortcut,ShortcutEdges
+from shortcut_config import shortcut,ShortcutEdges,VK_MOD
 
 user=C.WinDLL('user32',use_last_error=True);kernel=C.WinDLL('kernel32',use_last_error=True);gdi=C.WinDLL('gdi32',use_last_error=True);winmm=C.WinDLL('winmm')
 PTR=C.c_void_p;SIZE=C.c_size_t;LRESULT=C.c_ssize_t
@@ -80,8 +80,10 @@ class Hotkeys:
         new_hook=None;callback=None
         new_id=3 if old_id==1 else 1
         if vk and not register(None,new_id,mask|0x4000,vk):return False
-        chord=ShortcutEdges(mask,vk)
-        chord.down={k for k in range(8,256) if k not in (0x10,0x11,0x12) and key_state(k)&0x8000}
+        held=lambda k:bool(key_state(k)&0x8000)
+        chord=ShortcutEdges(mask,vk,held)
+        # Only modifiers: some devices report keys such as Numpad 4/5 as held forever, and no key-up ever follows.
+        chord.down={k for k in VK_MOD if k not in (0x10,0x11,0x12) and held(k)}
         chord.blocked=bool(chord.down)
         def receive(code,message,data):
             if code==0 and message in (0x100,0x101,0x104,0x105):

@@ -14,6 +14,7 @@ import uuid
 
 NO_WINDOW=0x08000000
 URL='http://127.0.0.1:17865'
+BACKEND_START_SECONDS=120
 
 class LaunchLock:
     def __init__(self,root):
@@ -86,17 +87,20 @@ def launch(root,desktop_only=False,notify=lambda _:None):
         notify('Flow Lab starten...');phase('checking_backend')
         ready=service_status()
         if not ready:
-            prior_pid=None
+            prior_pid=None;child=None
             try:prior_pid=int((root/'logs/app-17865.pid').read_text(encoding='ascii').strip())
             except (OSError,ValueError):pass
             if not port_open() and not (prior_pid and process_alive(prior_pid,root/'.venv/Scripts/python.exe')):
                 phase('starting_backend')
                 child=start_child(root,['-m','uvicorn','app:app','--host','127.0.0.1','--port','17865','--no-access-log'],'app-17865')
                 (root/'logs/app-17865.pid').write_text(str(child.pid),encoding='ascii')
-            deadline=time.monotonic()+45
+            # Koude start (Defender scant numpy/scipy/onnx na een herstart) duurde gemeten 31 en 69 seconden.
+            wait_start=time.monotonic();deadline=wait_start+BACKEND_START_SECONDS
             while not ready:
-                notify('Verwerking starten. De app wordt zo geopend...')
-                if time.monotonic()>=deadline:raise TimeoutError('Flow Lab is na 45 seconden nog niet gereed. De opstartstappen staan in logs/launcher-last-run.json.')
+                slow=time.monotonic()-wait_start>15
+                notify('Eerste start na een herstart duurt langer. Even geduld...' if slow else 'Verwerking starten. De app wordt zo geopend...')
+                if child and child.poll() is not None:raise RuntimeError('De verwerking is gestopt tijdens het opstarten. Bekijk logs/app-17865.stderr.log.')
+                if time.monotonic()>=deadline:raise TimeoutError(f'Flow Lab is na {BACKEND_START_SECONDS} seconden nog niet gereed. De opstartstappen staan in logs/launcher-last-run.json.')
                 time.sleep(.15);ready=service_status()
         trace['server_ready']=True;phase('backend_ready')
         state=helper_command(root,'--status')
